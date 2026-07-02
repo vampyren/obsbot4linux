@@ -11,6 +11,7 @@
 //   * deterministic shutdown of the worker thread (#1/#2/#3/#9)
 #pragma once
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QString>
 #include <QThread>
@@ -243,6 +244,12 @@ private:
     bool m_aiPending = false;
     int m_aiInFlight = 0;        // outstanding AI-track/face-focus toggle legs in flight
     QTimer *m_pendingTimer = nullptr;
+    // Started when an AI-Track ON command is confirmed. If the device then
+    // disengages on its own shortly after (status push back to None), we log an
+    // honest hint — the Tiny 3 accepts the command but silently drops tracking
+    // when it can't find a person in view (Rex: "AI track don't work… after
+    // some fiddling with presets [re-aiming the camera at me] it worked").
+    QElapsedTimer m_aiEngageTime;
 
     // Live image params (0–100), mirrored from the device on connect + on change.
     int m_brightness = 50, m_contrast = 50, m_saturation = 50, m_sharpness = 50;

@@ -21,6 +21,10 @@ const char *kFovLabels[] = {"Wide 86°", "Medium 78°", "Narrow 65°"};
 // gimbal keeps disengaging from AI for ~1 s after the off command is accepted,
 // and an immediate position move gets eaten or truncated.
 constexpr int kAiReturnDelayMs = 1500;
+// Window after a confirmed AI-Track ON in which a device-side drop back to None
+// is reported as "couldn't lock on" (the Tiny 3 accepts the command but silently
+// disengages when no person is in view).
+constexpr qint64 kAiDisengageHintMs = 10000;
 } // namespace
 
 CameraController::CameraController(QObject *parent) : QObject(parent) {
@@ -456,6 +460,7 @@ void CameraController::onDeviceLost(const QString &reason) {
     m_hdrPending = false;
     m_aiPending = false;
     m_aiInFlight = 0;
+    m_aiEngageTime.invalidate();
     m_hadDevice = false;   // a real loss: the next connect is genuine → preset re-fires
     m_zoomValid = false;
     emit connStateChanged();
@@ -482,8 +487,21 @@ void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, 
     // Resync confirmed AI Track from the device UNLESS a toggle is in flight (#8)
     // or the device is mid-switch (#5). Any settled ai_mode > None means tracking
     // is engaged (AI Track owns the gimbal).
-    if (!m_aiPending && aiModeRaw != kAiSwitching)
+    if (!m_aiPending && aiModeRaw != kAiSwitching) {
+        const bool was = m_aiTracking;
         m_aiTracking = (aiModeRaw > kAiNone);
+        // Device-side disengage right after we enabled tracking: the Tiny 3
+        // accepts AI-Track ON (rc=0) but silently drops back to None when it
+        // can't lock onto a person. Without this hint the chip just flips off
+        // and the user is left guessing — say what happened instead.
+        if (was && !m_aiTracking
+            && m_aiEngageTime.isValid() && m_aiEngageTime.elapsed() < kAiDisengageHintMs) {
+            emit logLine("warn", QStringLiteral(
+                "ai track: device disengaged itself right after enabling — it needs a "
+                "person in view to lock on. Aim the camera at yourself and try again."));
+        }
+        if (!m_aiTracking) m_aiEngageTime.invalidate();
+    }
     emit aiChanged();
 }
 
@@ -515,6 +533,10 @@ void CameraController::onWorkerResult(const QString &action, bool ok, int /*rc*/
     // AI Track leg confirmation: apply target on success, discard on failure (#5/#7).
     if (action.startsWith("ai track")) {
         if (ok) m_aiTracking = m_targetTracking;
+        // Arm the device-disengage detector on a confirmed ON (see onStatusUpdate);
+        // a deliberate OFF disarms it so it can't fire a bogus hint.
+        if (ok && action.endsWith("on") && m_targetTracking) m_aiEngageTime.start();
+        else if (action.endsWith("off"))                     m_aiEngageTime.invalidate();
         if (--m_aiInFlight <= 0) { m_aiInFlight = 0; m_aiPending = false; m_pendingTimer->stop(); }
         emit aiChanged();
         // "After AI off, go to preset": when turning AI Track OFF is confirmed and
