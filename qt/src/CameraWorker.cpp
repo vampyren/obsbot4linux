@@ -401,18 +401,18 @@ void CameraWorker::cmdSetGesture(bool on) {
     const QString a = QStringLiteral("gesture");
     if (!requireDevice(a)) return;
     emit logLine("cmd", QStringLiteral("→ gesture %1").arg(on ? "on" : "off"));
-    // The Tiny 3 is a "tail2 and later" product in SDK terms: the legacy
-    // aiSetGestureCtrlIndividualR (category "tiny, tiny4k, tiny2 series, tail
-    // air") is ACKed with rc=0 but has NO effect on it — hardware-verified
-    // (gestures never detected all session despite rc=0 on every toggle).
-    // Use the DevGestureParaType API instead: the MASTER gesture switch plus
-    // the target-select gesture. Legacy call kept as a fallback for older
-    // tinys that don't speak the para API.
+    // The Tiny 3 answers the "tail2 and later" DevGestureParaType API (master
+    // switch + target-select), so both are set here. BUT the legacy
+    // aiSetGestureCtrlIndividualR is ALSO driven unconditionally: it was the
+    // ONLY call sent in v0.1.0–v0.2.5 — the era when gesture actually worked
+    // on this device (flaky but real) — and v0.2.6 demoted it to a fallback
+    // that never fired (the para calls return OK). If the recognizer reads
+    // the legacy config store, that starved it. The device may keep TWO
+    // stores — write both, read both back, every time.
     int rc = m_dev->aiSetGestureParaR(Device::DevGestureParaTypeGesture, on);
     const int rcSel = m_dev->aiSetGestureParaR(Device::DevGestureParaTypeTargetSelection, on);
-    if (rc != RM_RET_OK && rcSel != RM_RET_OK)
-        rc = m_dev->aiSetGestureCtrlIndividualR(0, on);
-    const bool ok = (rc == RM_RET_OK || rcSel == RM_RET_OK);
+    const int rcLegacy = m_dev->aiSetGestureCtrlIndividualR(0, on);
+    const bool ok = (rc == RM_RET_OK || rcSel == RM_RET_OK || rcLegacy == RM_RET_OK);
     // Honest readback of the WHOLE gesture parameter table — rc=0 alone proved
     // meaningless for gesture on this device, and the flaky history (works in
     // some sessions, not others, same code) means we need to SEE the full
@@ -431,8 +431,22 @@ void CameraWorker::cmdSetGesture(bool on) {
         parts << QStringLiteral("zoom-factor=%1").arg(double(zf));
     if (!parts.isEmpty())
         emit logLine("sys", QStringLiteral("gesture readback: %1").arg(parts.join(QStringLiteral(", "))));
+    // Legacy store readback (AiStatus) — if this ever disagrees with the para
+    // table above, the two-store theory is confirmed and we know which store
+    // the recognizer actually honors.
+    Device::AiStatus ai{};
+    if (m_dev->aiGetAiStatusR(&ai) == RM_RET_OK)
+        emit logLine("sys", QStringLiteral("gesture legacy store: target=%1, zoom=%2, dynamic-zoom=%3, mirror=%4, zoom-factor=%5")
+                                .arg(ai.gesture_target ? "on" : "off",
+                                     ai.gesture_zoom ? "on" : "off",
+                                     ai.gesture_dynamic_zoom ? "on" : "off",
+                                     ai.gesture_mirror ? "on" : "off")
+                                .arg(double(ai.gesture_zoom_factor)));
+    else
+        emit logLine("sys", QStringLiteral("gesture legacy store: not readable on this device"));
     emit commandResult(a, ok, rc, on ? QStringLiteral("on") : QStringLiteral("off"));
-    emit logLine(ok ? "ok" : "warn", QStringLiteral("gesture %1  rc=%2").arg(on ? "on" : "off").arg(rc));
+    emit logLine(ok ? "ok" : "warn", QStringLiteral("gesture %1  rc=%2 (para), rc=%3 (legacy)")
+                                         .arg(on ? "on" : "off").arg(rc).arg(rcLegacy));
 }
 
 void CameraWorker::cmdSetHdr(bool on) {
