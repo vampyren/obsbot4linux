@@ -139,9 +139,9 @@ RowLayout {
     }
 
     GlassPanel {
-        Layout.preferredWidth: 300
-        Layout.maximumWidth: 320
-        Layout.preferredHeight: 220
+        Layout.preferredWidth: 460
+        Layout.maximumWidth: 480
+        Layout.preferredHeight: 310
         Layout.alignment: Qt.AlignTop
         ColumnLayout {
             anchors.fill: parent
