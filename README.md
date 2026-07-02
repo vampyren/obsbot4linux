@@ -47,6 +47,15 @@ chmod +x OBSBOT4Linux-x86_64.AppImage
 ./OBSBOT4Linux-x86_64.AppImage
 ```
 
+> **⚠️ Note on the AppImage & the OBSBOT SDK.** For "download-and-run" convenience,
+> the prebuilt AppImage is self-contained and **bundles OBSBOT's proprietary
+> `libdev.so` SDK** so it works out of the box. That SDK is OBSBOT's property — it
+> is **not** part of this project's source and is excluded from this repository;
+> it is included **only** inside the convenience AppImage. If you are OBSBOT, or
+> otherwise object to the SDK being distributed this way, please **contact me at
+> vampyren@protonmail.com** and I will remove the bundled build promptly. Building
+> from source (below) never redistributes the SDK — you supply it yourself.
+
 **Build from source** (Arch / CachyOS example):
 
 ```sh
