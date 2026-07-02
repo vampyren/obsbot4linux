@@ -401,9 +401,25 @@ void CameraWorker::cmdSetGesture(bool on) {
     const QString a = QStringLiteral("gesture");
     if (!requireDevice(a)) return;
     emit logLine("cmd", QStringLiteral("→ gesture %1").arg(on ? "on" : "off"));
-    // Gesture "target select" (type 0) is the main on/off gesture control.
-    const int rc = m_dev->aiSetGestureCtrlIndividualR(0, on);
-    const bool ok = (rc == RM_RET_OK);
+    // The Tiny 3 is a "tail2 and later" product in SDK terms: the legacy
+    // aiSetGestureCtrlIndividualR (category "tiny, tiny4k, tiny2 series, tail
+    // air") is ACKed with rc=0 but has NO effect on it — hardware-verified
+    // (gestures never detected all session despite rc=0 on every toggle).
+    // Use the DevGestureParaType API instead: the MASTER gesture switch plus
+    // the target-select gesture. Legacy call kept as a fallback for older
+    // tinys that don't speak the para API.
+    int rc = m_dev->aiSetGestureParaR(Device::DevGestureParaTypeGesture, on);
+    const int rcSel = m_dev->aiSetGestureParaR(Device::DevGestureParaTypeTargetSelection, on);
+    if (rc != RM_RET_OK && rcSel != RM_RET_OK)
+        rc = m_dev->aiSetGestureCtrlIndividualR(0, on);
+    const bool ok = (rc == RM_RET_OK || rcSel == RM_RET_OK);
+    // Honest readback — rc=0 alone proved meaningless for gesture on this
+    // device, so log what the camera says it actually did.
+    bool devGesture = false, devTarget = false;
+    if (m_dev->aiGetGestureParaR(Device::DevGestureParaTypeGesture, devGesture) == RM_RET_OK
+        && m_dev->aiGetGestureParaR(Device::DevGestureParaTypeTargetSelection, devTarget) == RM_RET_OK)
+        emit logLine("sys", QStringLiteral("gesture readback: function=%1, target-select=%2")
+                                .arg(devGesture ? "on" : "off", devTarget ? "on" : "off"));
     emit commandResult(a, ok, rc, on ? QStringLiteral("on") : QStringLiteral("off"));
     emit logLine(ok ? "ok" : "warn", QStringLiteral("gesture %1  rc=%2").arg(on ? "on" : "off").arg(rc));
 }
