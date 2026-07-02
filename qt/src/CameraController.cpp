@@ -411,6 +411,17 @@ void CameraController::goPreset(int idx) {
     QMetaObject::invokeMethod(m_worker, "cmdPresetGo", Qt::QueuedConnection,
                               Q_ARG(int, idx), Q_ARG(double, p.tilt), Q_ARG(double, p.pan),
                               Q_ARG(double, p.zoom), Q_ARG(int, p.fov), Q_ARG(double, speedValue()));
+    // The preset re-applies its SAVED FOV on the device (cmdPresetGo →
+    // cameraSetFovU) — keep the FOV selector in sync instead of silently
+    // diverging. Rex's "Wide/Med show the same" bug: the startup/wake/AI-return
+    // preset had restored the preset's FOV behind the selector's back, so the
+    // first click on the already-active FOV looked like a no-op and only the
+    // second click (a real change) visibly worked.
+    if (p.fov >= 0 && p.fov <= 2 && p.fov != m_settings.fovIndex) {
+        m_settings.fovIndex = p.fov;
+        persist();
+        emit settingsChanged();
+    }
 }
 void CameraController::clearPreset(int idx) {
     if (idx < 0 || idx > 2) return;

@@ -511,7 +511,7 @@ void CameraWorker::cmdPresetGo(int idx, double pitch, double yaw, double zoom, i
     const float ny = clampf(static_cast<float>(yaw), kYawMin, kYawMax);
     const int rc = m_dev->gimbalSetSpeedPositionR(0.0f, np, ny, 0.0f,
                                                   static_cast<float>(speed), static_cast<float>(speed));
-    if (fov >= 0)
+    if (fov >= Device::FovType86 && fov <= Device::FovType65)   // never cast junk into the enum
         m_dev->cameraSetFovU(static_cast<Device::FovType>(fov));
     const float tz = clampf(static_cast<float>(zoom), 1.0f, 2.0f);
     m_dev->cameraSetZoomAbsoluteR(tz);
