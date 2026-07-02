@@ -364,8 +364,13 @@ void CameraController::stopPreview() {
     m_previewProc = nullptr;
     disconnect(p, nullptr, this, nullptr);   // don't let the finished-lambda re-fire during teardown
     p->terminate();
-    if (!p->waitForFinished(800))
+    if (!p->waitForFinished(800)) {
         p->kill();
+        // Wait for the kill to land too — callers may start the EMBEDDED
+        // preview immediately after this returns, and a still-dying ffplay
+        // would hold the UVC node and bounce it with "device busy".
+        p->waitForFinished(500);
+    }
     p->deleteLater();
 }
 

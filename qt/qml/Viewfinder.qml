@@ -38,7 +38,15 @@ Rectangle {
         fillMode: VideoOutput.PreserveAspectFit
         visible: preview.active
     }
-    Component.onCompleted: preview.videoSink = vout.videoSink
+    // Viewfinder is instantiated on THREE pages (Control / Image / Tracking) but
+    // QMediaCaptureSession drives exactly ONE sink — so the instance that is
+    // actually on screen claims it. StackLayout toggles effective visibility on
+    // page switch, so onVisibleChanged re-routes the stream to the current page
+    // (a naive last-created-wins assignment left frames rendering into a hidden
+    // page while the visible one stayed black).
+    function claimSink() { if (visible) preview.videoSink = vout.videoSink }
+    Component.onCompleted: claimSink()
+    onVisibleChanged: claimSink()
     // Stop the stream before this item's VideoOutput/sink is destroyed (the QML
     // engine is torn down before PreviewEngine at shutdown) — don't leave the
     // capture session pointing at a dead sink.

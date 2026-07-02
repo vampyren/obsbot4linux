@@ -59,12 +59,16 @@ void PreviewEngine::refreshDevice() {
 
     if (found.id() == m_device.id() && !found.isNull()) return;   // same node, nothing to do
 
-    const bool lostWhileActive = m_active && found.isNull();
+    // Gone OR re-enumerated under a new id (replug can shift /dev/videoN while
+    // the old node lingers): either way the camera we're streaming from no
+    // longer exists — stop honestly rather than leave a frozen last frame
+    // "live" until the backend happens to error out.
+    const bool lostWhileActive = m_active;
     m_device = found;
 
     if (lostWhileActive) {
         stop();
-        emit logLine("err", QStringLiteral("preview: video device lost — stopped"));
+        emit logLine("err", QStringLiteral("preview: video device lost/changed — stopped"));
     }
     if (available() != wasAvailable || !found.isNull())
         emit availabilityChanged();
@@ -110,10 +114,17 @@ void PreviewEngine::start() {
     // errors, permission problems — stop and say why, never freeze a frame.
     // QUEUED: stop() destroys the QCamera, and destroying the sender from
     // inside its own (direct) signal emission is a use-after-free — defer the
-    // teardown to the next event-loop pass.
+    // teardown to the next event-loop pass. Because a queued delivery survives
+    // both disconnect() and sender destruction, the lambda is tagged with the
+    // camera GENERATION it came from and bails if the engine has since moved on
+    // (otherwise a stale error from camera A would stop() a freshly restarted
+    // camera B, e.g. right after a resolution change). A generation counter —
+    // not a captured pointer — so an allocator reusing the old address can't
+    // false-match.
+    const quint64 origin = ++m_camGeneration;
     connect(m_camera.get(), &QCamera::errorOccurred, this,
-            [this](QCamera::Error err, const QString &msg) {
-                if (err == QCamera::NoError) return;
+            [this, origin](QCamera::Error err, const QString &msg) {
+                if (err == QCamera::NoError || origin != m_camGeneration) return;
                 emit logLine("err", QStringLiteral("preview: %1").arg(
                                         msg.isEmpty() ? QStringLiteral("capture error") : msg));
                 stop();

@@ -70,4 +70,7 @@ private:
     QPointer<QVideoSink> m_sink;
     bool m_active = false;
     int m_resIndex = 1;                 // synced from settings by main.cpp
+    // Bumped for every new QCamera; queued error deliveries from an older
+    // camera compare against this and bail (see start()).
+    quint64 m_camGeneration = 0;
 };
