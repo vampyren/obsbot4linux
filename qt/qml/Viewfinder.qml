@@ -1,14 +1,15 @@
-// The pinned viewfinder surface. It is a PLACEHOLDER — there is no embedded
-// video in this pass and no fake feed. The region is a single resizable surface
-// with overlays layered on top, so a real VideoOutput / GStreamer sink can drop
-// in later without a redesign. The ffplay affordance opens REAL frames in a
-// separate external window.
+// The pinned viewfinder surface, now with the EMBEDDED live preview (issue #1):
+// a QtMultimedia VideoOutput fed real UVC frames by PreviewEngine (context
+// property `preview`). No fake feed, ever — when the stream is not running the
+// surface is the plain dark panel, and capture errors stop the stream with the
+// reason in the log rather than freezing a frame.
 //
 // Four connection states are rendered: connected (rule-of-thirds grid + LIVE
 // pill + readout), asleep (moon + Wake), discovering (scan rings), disconnected
 // (video-off + Rescan).
 import QtQuick
 import QtQuick.Layouts
+import QtMultimedia
 import Obsbot
 
 Rectangle {
@@ -21,14 +22,27 @@ Rectangle {
 
     readonly property bool live: cam.connected && !cam.asleep
 
-    // faint accent glow behind the (notional) subject
+    // faint accent glow behind the (notional) subject — hidden once real video runs
     Rectangle {
         anchors.centerIn: parent
         width: parent.width * 0.7; height: width; radius: width / 2
         color: Theme.accent
-        opacity: root.live ? 0.05 : 0.0
+        opacity: (root.live && !preview.active) ? 0.05 : 0.0
         Behavior on opacity { NumberAnimation { duration: Theme.base } }
     }
+
+    // the embedded live stream (real frames from PreviewEngine; overlays sit on top)
+    VideoOutput {
+        id: vout
+        anchors.fill: parent
+        fillMode: VideoOutput.PreserveAspectFit
+        visible: preview.active
+    }
+    Component.onCompleted: preview.videoSink = vout.videoSink
+    // Stop the stream before this item's VideoOutput/sink is destroyed (the QML
+    // engine is torn down before PreviewEngine at shutdown) — don't leave the
+    // capture session pointing at a dead sink.
+    Component.onDestruction: preview.stop()
 
     // dim wash while asleep (below the overlays so the Wake button stays bright)
     Rectangle {
@@ -90,13 +104,28 @@ Rectangle {
         font.pixelSize: 11
     }
 
-    // ffplay affordance (bottom-right)
-    ActionButton {
+    // preview controls (bottom-right). Embedded is the primary path; ffplay is
+    // the external-window fallback. Both capture the same UVC node, so starting
+    // one stops the other (mutual exclusion kept explicit here in QML).
+    Row {
         anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 12
-        text: "ffplay ↗"
-        variant: "ghost"
-        enabled: cam.previewAvailable
-        onClicked: cam.launchPreview()
+        spacing: 8
+        // ffplay fallback (external window) — for boxes where the embedded
+        // QtMultimedia path misbehaves.
+        ActionButton {
+            text: "ffplay ↗"
+            variant: "ghost"
+            enabled: cam.previewAvailable && root.live
+            onClicked: { preview.stop(); cam.launchPreview() }
+        }
+        // embedded preview toggle; stays enabled while active so a running
+        // stream can always be stopped, even mid-sleep/disconnect.
+        ActionButton {
+            text: preview.active ? "stop preview ■" : "preview ▶"
+            variant: preview.active ? "secondary" : "ghost"
+            enabled: (preview.available && root.live) || preview.active
+            onClicked: { if (!preview.active) cam.stopPreview(); preview.toggle() }
+        }
     }
 
     // ----- overlays for non-live states -----

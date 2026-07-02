@@ -1,5 +1,6 @@
 #include "CameraController.h"
 #include "CameraWorker.h"
+#include "PreviewFormats.h"
 
 #include <QFileInfo>
 #include <QProcess>
@@ -14,23 +15,15 @@ constexpr int kAiHuman = 2;   // AiWorkModeHuman (single-person tracking)
 constexpr int kAiSwitching = 6;
 
 const char *kFovLabels[] = {"Wide 86°", "Medium 78°", "Narrow 65°"};
-
-// Preview (ffplay) capture resolutions, indexed by AppSettings::previewResIndex.
-struct PreviewRes { const char *label; int w; int h; int fps; };
-const PreviewRes kPreviewRes[] = {
-    {"1080p30", 1920, 1080, 30},
-    {"1080p60", 1920, 1080, 60},
-    {"720p60",  1280, 720,  60},
-    {"4K30",    3840, 2160, 30},
-};
-constexpr int kPreviewResCount = int(sizeof(kPreviewRes) / sizeof(kPreviewRes[0]));
+// (Preview resolutions live in PreviewFormats.h — shared with PreviewEngine.)
 } // namespace
 
 CameraController::CameraController(QObject *parent) : QObject(parent) {
     m_settings = Settings::load();
     m_aiModeName = QStringLiteral("Off");
 
-    // Preview availability: ffplay present AND a /dev/video0 node exists.
+    // ffplay fallback availability: ffplay present AND a /dev/video0 node exists.
+    // (The embedded preview has its own by-name device detection in PreviewEngine.)
     m_previewAvailable = !QStandardPaths::findExecutable("ffplay").isEmpty()
                          && QFileInfo::exists("/dev/video0");
 
@@ -207,9 +200,10 @@ void CameraController::setPreviewResIndex(int idx) {
     if (idx < 0 || idx >= kPreviewResCount || idx == m_settings.previewResIndex) return;
     m_settings.previewResIndex = idx;
     persist();
+    // The EMBEDDED preview restarts at the new mode via main.cpp syncing
+    // PreviewEngine off this signal.
     emit settingsChanged();
-    // If a preview is currently open, reload it at the new resolution so the
-    // change takes effect immediately (ffplay can't switch mode mid-stream).
+    // The ffplay FALLBACK (if open) is reloaded here — it can't switch mid-stream.
     if (m_previewProc)
         launchPreview();
 }
@@ -329,17 +323,16 @@ void CameraController::rescan() {
 }
 
 void CameraController::launchPreview() {
+    // FALLBACK path: real frames in a SEPARATE ffplay window. Kept alongside the
+    // embedded preview (PreviewEngine) for boxes where QtMultimedia misbehaves.
+    // Occupies the UVC node — conflicts with the embedded preview and with
+    // browser/Meet/OBS camera use, exactly like any other capture client.
     if (!m_previewAvailable) {
         emit logLine("warn", QStringLiteral("preview: ffplay or /dev/video0 not available"));
         return;
     }
     stopPreview();   // kill any existing preview first (also used to reload on res change)
 
-    // Real frames in a SEPARATE window (never embedded, never faked). Occupies
-    // /dev/video0 and will conflict with browser/Meet/OBS camera use. The chosen
-    // preview resolution is what ffplay REQUESTS from the v4l2 node — this is the
-    // one honest sense in which this app can pick a "resolution" (the device
-    // negotiates it for this capture); the SDK itself can't set the UVC mode.
     const int ri = (m_settings.previewResIndex >= 0 && m_settings.previewResIndex < kPreviewResCount)
                        ? m_settings.previewResIndex : 0;
     const PreviewRes &pr = kPreviewRes[ri];
@@ -361,7 +354,7 @@ void CameraController::launchPreview() {
         "-window_title", QStringLiteral("OBSBOT preview (%1)").arg(QString::fromLatin1(pr.label)),
         "/dev/video0"};
     m_previewProc->start(QStringLiteral("ffplay"), args);
-    emit logLine("cmd", QStringLiteral("preview: launched ffplay at %1 (external window)")
+    emit logLine("cmd", QStringLiteral("preview: launched ffplay at %1 (external window, fallback)")
                             .arg(QString::fromLatin1(pr.label)));
 }
 

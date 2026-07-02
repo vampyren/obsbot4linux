@@ -5,7 +5,7 @@
 # script also exports LD_LIBRARY_PATH as a belt-and-braces fallback.
 cmake_minimum_required(VERSION 3.21)
 
-project(obsbot4linux VERSION 0.1.0 LANGUAGES CXX)
+project(obsbot4linux VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,7 +21,7 @@ if(NOT EXISTS "${SDK_LIB}/libdev.so")
 endif()
 
 # ---- Qt 6 ------------------------------------------------------------------
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Quick Gui Qml QuickControls2)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Quick Gui Qml QuickControls2 Multimedia)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # QML sources live in the qml/ subdirectory. Opt into the modern qmldir handling
@@ -35,6 +35,7 @@ qt_add_executable(obsbot4linux
     src/main.cpp
     src/CameraController.cpp
     src/CameraWorker.cpp
+    src/PreviewEngine.cpp
     src/Settings.cpp
 )
 
@@ -76,6 +77,7 @@ target_link_libraries(obsbot4linux PRIVATE
     Qt6::QuickControls2
     Qt6::Gui
     Qt6::Qml
+    Qt6::Multimedia
     "${SDK_LIB}/libdev.so"
     pthread
 )

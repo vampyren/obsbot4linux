@@ -90,7 +90,7 @@ RowLayout {
                 KeyValue { key: "zoom"; value: cam.zoomValid ? cam.zoom.toFixed(2) + "x  (1.0–2.0)" : "—"; unknown: !cam.zoomValid }
                 KeyValue { key: "AI / track"; value: cam.connected ? cam.aiModeName : "—"; unknown: !cam.connected }
                 KeyValue { key: "video fps"; value: (cam.connected && cam.fps > 0) ? cam.fps + " fps" : "—"; unknown: !(cam.connected && cam.fps > 0) }
-                KeyValue { key: "preview res"; value: cam.previewRes + "  (ffplay)"; valueColor: Theme.accentSoft }
+                KeyValue { key: "preview res"; value: cam.previewRes; valueColor: Theme.accentSoft }
             }
         }
 
@@ -174,8 +174,9 @@ RowLayout {
 
                     // Preview resolution — label on its own line so the four wide
                     // options get the full panel width (a side label overlapped
-                    // them). Sets what the ffplay preview requests from /dev/video0.
-                    SectionLabel { text: "Preview resolution (ffplay)" }
+                    // them). Sets the UVC mode both the embedded preview and the
+                    // ffplay fallback request from the camera.
+                    SectionLabel { text: "Preview resolution" }
                     Segmented {
                         Layout.fillWidth: true
                         options: ["1080p30", "1080p60", "720p60", "4K30"]

@@ -8,6 +8,9 @@ libdev_v2_1_0_8.zip
 # (legacy pre-move location, in case an old checkout still has it)
 libdev_v2.1.0_8/
 
+# sandbox Qt-install tool log
+aqtinstall.log
+
 # macOS cruft from the SDK zip extraction
 .DS_Store
 __MACOSX/

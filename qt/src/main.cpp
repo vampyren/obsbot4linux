@@ -17,6 +17,7 @@
 #include <cstdlib>
 
 #include "CameraController.h"
+#include "PreviewEngine.h"
 
 int main(int argc, char **argv) {
     int waitMs = 6000;
@@ -94,8 +95,24 @@ int main(int argc, char **argv) {
         return code;
     }
 
+    // Embedded preview (GUI mode only — the self-test path above never needs
+    // video). Declared after the controller so it is destroyed FIRST, releasing
+    // the UVC node before the controller's sleep-on-exit/shutdown sequence runs.
+    PreviewEngine preview;
+    // Preview events flow into the same activity log as everything else
+    // (signal → signal chain).
+    QObject::connect(&preview, &PreviewEngine::logLine,
+                     &controller, &CameraController::logLine);
+    // Keep the engine's capture mode synced to the persisted resolution choice.
+    preview.setResIndex(controller.previewResIndex());
+    QObject::connect(&controller, &CameraController::settingsChanged, &preview,
+                     [&controller, &preview]() {
+                         preview.setResIndex(controller.previewResIndex());
+                     });
+
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("cam", &controller);
+    engine.rootContext()->setContextProperty("preview", &preview);
     engine.loadFromModule("Obsbot", "Main");
     if (engine.rootObjects().isEmpty()) {
         std::fprintf(stderr, "Failed to load QML UI (no display, or missing Qt Quick runtime).\n");

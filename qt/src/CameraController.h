@@ -84,8 +84,10 @@ class CameraController : public QObject {
     Q_PROPERTY(bool capTrackingAdvanced READ capTrackingAdvanced CONSTANT)
     Q_PROPERTY(QString capUnverifiedReason READ capUnverifiedReason CONSTANT)
 
-    // ----- presets + preview -----
+    // ----- presets + external-preview fallback -----
     Q_PROPERTY(QVariantList presets READ presets NOTIFY presetsChanged)
+    // ffplay fallback (kept alongside the embedded preview): external window path
+    // for when QtMultimedia misbehaves on a given box.
     Q_PROPERTY(bool previewAvailable READ previewAvailable CONSTANT)
 
 public:
@@ -158,7 +160,7 @@ public slots:
     void setHdr(bool on);             // HDR/WDR on/off (only when capHdr)
     void setImageParam(const QString &param, int value);  // brightness/contrast/saturation/sharpness
     void rescan();
-    void launchPreview();   // (re)launch the external ffplay preview at the chosen resolution
+    void launchPreview();   // FALLBACK: (re)launch the external ffplay preview
     void stopPreview();     // terminate the ffplay preview (also called on shutdown)
 
     // VELOCITY (hold-to-move) PTZ — see CameraWorker for the safety-stop design.

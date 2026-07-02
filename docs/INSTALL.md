@@ -72,7 +72,7 @@ QT_QUICK_BACKEND=software ./OBSBOT4Linux-x86_64.AppImage
 
 **Arch / CachyOS**
 ```sh
-sudo pacman -S --needed cmake qt6-base qt6-declarative qt6-wayland
+sudo pacman -S --needed cmake qt6-base qt6-declarative qt6-multimedia qt6-wayland
 # optional: ttf-jetbrains-mono (chrome font), ffmpeg (external preview)
 ```
 
@@ -82,6 +82,7 @@ sudo apt install cmake g++ \
   qt6-base-dev qt6-declarative-dev \
   qml6-module-qtquick qml6-module-qtquick-controls \
   qml6-module-qtquick-layouts qml6-module-qtquick-window \
+  qt6-multimedia-dev qml6-module-qtmultimedia \
   qt6-wayland
 ```
 

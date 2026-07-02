@@ -1,0 +1,166 @@
+#include "PreviewEngine.h"
+#include "PreviewFormats.h"
+
+#include <QVideoFrameFormat>
+
+#include <algorithm>
+
+namespace {
+// A UVC format entry matches a requested (w, h, fps) when the resolution is
+// exact and the requested rate falls inside the entry's advertised range
+// (v4l2 discrete rates surface as min == max, so this is an exact match too).
+bool formatMatches(const QCameraFormat &f, int w, int h, int fps) {
+    return f.resolution().width() == w && f.resolution().height() == h
+           && f.minFrameRate() <= fps + 0.5 && f.maxFrameRate() >= fps - 0.5;
+}
+} // namespace
+
+PreviewEngine::PreviewEngine(QObject *parent) : QObject(parent) {
+    connect(&m_mediaDevices, &QMediaDevices::videoInputsChanged,
+            this, &PreviewEngine::refreshDevice);
+    refreshDevice();
+}
+
+PreviewEngine::~PreviewEngine() {
+    stop();
+}
+
+QString PreviewEngine::unavailableReason() const {
+    if (available()) return QString();
+    return QStringLiteral("No OBSBOT video device found — preview needs the camera's UVC node.");
+}
+
+void PreviewEngine::setVideoSink(QVideoSink *sink) {
+    if (sink == m_sink) return;
+    m_sink = sink;
+    m_session.setVideoSink(m_sink);
+    emit videoSinkChanged();
+}
+
+void PreviewEngine::refreshDevice() {
+    // Pick the OBSBOT capture node by name. The Tiny 3 enumerates as
+    // "OBSBOT Tiny 3: OBSBOT Tiny 3 St…" and may expose more than one node
+    // (/dev/video0 capture + /dev/video1 metadata) — require MJPG formats so we
+    // land on the real capture node, never a metadata one.
+    const bool wasAvailable = available();
+    QCameraDevice found;
+    const auto inputs = QMediaDevices::videoInputs();
+    for (const QCameraDevice &d : inputs) {
+        if (!d.description().contains(QLatin1String("OBSBOT"), Qt::CaseInsensitive))
+            continue;
+        const auto formats = d.videoFormats();
+        const bool hasJpeg = std::any_of(formats.cbegin(), formats.cend(),
+            [](const QCameraFormat &f) {
+                return f.pixelFormat() == QVideoFrameFormat::Format_Jpeg;
+            });
+        if (hasJpeg) { found = d; break; }
+        if (found.isNull()) found = d;   // keep as fallback if no node has MJPG
+    }
+
+    if (found.id() == m_device.id() && !found.isNull()) return;   // same node, nothing to do
+
+    const bool lostWhileActive = m_active && found.isNull();
+    m_device = found;
+
+    if (lostWhileActive) {
+        stop();
+        emit logLine("err", QStringLiteral("preview: video device lost — stopped"));
+    }
+    if (available() != wasAvailable || !found.isNull())
+        emit availabilityChanged();
+    if (available() && !wasAvailable)
+        emit logLine("sys", QStringLiteral("preview: video device found (%1)").arg(m_device.description()));
+}
+
+QCameraFormat PreviewEngine::pickFormat() {
+    const int ri = (m_resIndex >= 0 && m_resIndex < kPreviewResCount) ? m_resIndex : 0;
+    const PreviewRes &want = kPreviewRes[ri];
+
+    QCameraFormat bestJpeg;   // fallback: highest-resolution MJPG mode
+    const auto formats = m_device.videoFormats();
+    for (const QCameraFormat &f : formats) {
+        if (f.pixelFormat() != QVideoFrameFormat::Format_Jpeg) continue;   // MJPG only
+        if (formatMatches(f, want.w, want.h, want.fps))
+            return f;
+        if (bestJpeg.isNull()
+            || f.resolution().width() * f.resolution().height()
+                   > bestJpeg.resolution().width() * bestJpeg.resolution().height())
+            bestJpeg = f;
+    }
+    if (!bestJpeg.isNull())
+        emit logLine("warn",
+            QStringLiteral("preview: %1 not advertised by the device — falling back to %2x%3")
+                .arg(QLatin1String(want.label))
+                .arg(bestJpeg.resolution().width()).arg(bestJpeg.resolution().height()));
+    return bestJpeg;   // may be null → QCamera picks its own default (logged in start)
+}
+
+void PreviewEngine::start() {
+    if (m_active) return;
+    if (m_camera) stop();   // clear a stale failed-start camera before retrying
+    if (!available()) {
+        emit logLine("warn", unavailableReason());
+        return;
+    }
+
+    const int ri = (m_resIndex >= 0 && m_resIndex < kPreviewResCount) ? m_resIndex : 0;
+
+    m_camera = std::make_unique<QCamera>(m_device);
+    // Honest failure path: device busy (another app holds the node), backend
+    // errors, permission problems — stop and say why, never freeze a frame.
+    // QUEUED: stop() destroys the QCamera, and destroying the sender from
+    // inside its own (direct) signal emission is a use-after-free — defer the
+    // teardown to the next event-loop pass.
+    connect(m_camera.get(), &QCamera::errorOccurred, this,
+            [this](QCamera::Error err, const QString &msg) {
+                if (err == QCamera::NoError) return;
+                emit logLine("err", QStringLiteral("preview: %1").arg(
+                                        msg.isEmpty() ? QStringLiteral("capture error") : msg));
+                stop();
+            },
+            Qt::QueuedConnection);
+    // Mirror the backend's real active state (start() is asynchronous).
+    connect(m_camera.get(), &QCamera::activeChanged, this, [this](bool active) {
+        if (m_active == active) return;
+        m_active = active;
+        emit activeChanged();
+    });
+
+    const QCameraFormat fmt = pickFormat();
+    if (!fmt.isNull())
+        m_camera->setCameraFormat(fmt);
+
+    m_session.setVideoSink(m_sink);
+    m_session.setCamera(m_camera.get());
+    m_camera->start();
+    emit logLine("cmd", QStringLiteral("preview: starting embedded stream at %1 (MJPG)")
+                            .arg(QLatin1String(kPreviewRes[ri].label)));
+}
+
+void PreviewEngine::stop() {
+    if (!m_camera) return;
+    m_camera->disconnect(this);   // no error/active callbacks during teardown
+    m_camera->stop();
+    m_session.setCamera(nullptr);
+    m_camera.reset();
+    if (m_active) {
+        m_active = false;
+        emit activeChanged();
+        emit logLine("sys", QStringLiteral("preview: stopped"));
+    }
+}
+
+void PreviewEngine::toggle() {
+    if (m_active || m_camera) stop();
+    else start();
+}
+
+void PreviewEngine::setResIndex(int idx) {
+    if (idx < 0 || idx >= kPreviewResCount || idx == m_resIndex) return;
+    m_resIndex = idx;
+    // A UVC mode change needs stream renegotiation — restart if running.
+    if (m_camera) {
+        stop();
+        start();
+    }
+}

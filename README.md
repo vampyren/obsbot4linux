@@ -23,7 +23,7 @@ There's no official OBSBOT control app for Linux. This fills that gap with a com
 - **AI tracking** — AI Track (the camera follows a person and keeps their face framed; the ring LED turns blue), Face autofocus, and Gesture control.
 - **Image tuning** — Brightness / Contrast / Saturation / Sharpness (0–100) with one-click reset.
 - **Presets** — three saved pan/tilt/zoom/FOV positions with save / recall / overwrite / clear, **load-a-preset on startup or wake**, and **return-to-a-preset after AI is turned off**.
-- **External preview** — a one-click `ffplay` window at a selectable resolution (1080p30 / 1080p60 / 720p60 / 4K30). No fake/placeholder video is ever shown.
+- **Embedded live preview** — the camera's real video stream right in the app window, at a selectable resolution (1080p30 / 1080p60 / 720p60 / 4K30), with an external `ffplay` window kept as a fallback. No fake/placeholder video is ever shown.
 - **Activity log** — every command and its real SDK return code, so you always know what the camera actually did.
 
 Settings and presets persist to `~/.config/obsbot4linux/obsbot4linux.json`.
@@ -59,7 +59,7 @@ chmod +x OBSBOT4Linux-x86_64.AppImage
 **Build from source** (Arch / CachyOS example):
 
 ```sh
-sudo pacman -S --needed cmake qt6-base qt6-declarative qt6-wayland
+sudo pacman -S --needed cmake qt6-base qt6-declarative qt6-multimedia qt6-wayland
 # place the OBSBOT SDK under sdk/ (see docs/INSTALL.md), then:
 ./obsbot4linux      # configures, builds, and runs
 ```
@@ -75,7 +75,7 @@ This app links OBSBOT's proprietary **`libdev`** SDK, which is **not included** 
 
 ## Status
 
-**v0.1.0** — works on real hardware (validated against a Tiny 3, firmware 6.6.9.1). Pre-1.0 while features are still being added; the next major item is an **embedded in-app preview** (currently the preview opens in an external `ffplay` window). Development notes live in [docs/dev/](docs/dev/).
+**v0.2.0** — works on real hardware (validated against a Tiny 3, firmware 6.6.9.1). Pre-1.0 while features are still being added. New in 0.2.0: **embedded in-app live preview** (Qt Multimedia; the external `ffplay` window remains as a fallback). Development notes live in [docs/dev/](docs/dev/); planned work is tracked on the [project board](https://github.com/users/vampyren/projects/4).
 
 ## Platform & compatibility
 
