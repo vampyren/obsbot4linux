@@ -4,6 +4,7 @@
 #include <QVideoFrameFormat>
 
 #include <algorithm>
+#include <cmath>
 
 namespace {
 // A UVC format entry matches a requested (w, h, fps) when the resolution is
@@ -80,16 +81,42 @@ QCameraFormat PreviewEngine::pickFormat() {
     const int ri = (m_resIndex >= 0 && m_resIndex < kPreviewResCount) ? m_resIndex : 0;
     const PreviewRes &want = kPreviewRes[ri];
 
-    QCameraFormat bestJpeg;   // fallback: highest-resolution MJPG mode
+    // Prefer a DISCRETE entry whose rate IS the wanted fps (min == max == fps).
+    // A range entry (min..max) merely *containing* the wanted fps is second
+    // choice — the backend streams such a format at its max rate, which is how
+    // "1080p30" once came out as 1080p120 on hardware (¼ the exposure time →
+    // washed-out colors and visibly worse frames than ffplay's honest 30).
+    QCameraFormat exact;      // min == max == wanted fps, wanted resolution
+    QCameraFormat containing; // range spanning wanted fps, wanted resolution
+    QCameraFormat bestJpeg;   // last resort: highest-resolution MJPG mode
     const auto formats = m_device.videoFormats();
     for (const QCameraFormat &f : formats) {
         if (f.pixelFormat() != QVideoFrameFormat::Format_Jpeg) continue;   // MJPG only
-        if (formatMatches(f, want.w, want.h, want.fps))
-            return f;
+        if (f.resolution().width() == want.w && f.resolution().height() == want.h) {
+            const bool minHit = std::abs(f.minFrameRate() - want.fps) <= 0.5;
+            const bool maxHit = std::abs(f.maxFrameRate() - want.fps) <= 0.5;
+            if (minHit && maxHit) { exact = f; break; }
+            if (formatMatches(f, want.w, want.h, want.fps)
+                && (containing.isNull()
+                    || f.maxFrameRate() < containing.maxFrameRate()))   // least overshoot
+                containing = f;
+        }
         if (bestJpeg.isNull()
             || f.resolution().width() * f.resolution().height()
                    > bestJpeg.resolution().width() * bestJpeg.resolution().height())
             bestJpeg = f;
+    }
+    if (!exact.isNull())
+        return exact;
+    if (!containing.isNull()) {
+        emit logLine("warn",
+            QStringLiteral("preview: no discrete %1 mode — using a %2–%3 fps range format "
+                           "(the backend may run it above %4 fps)")
+                .arg(QLatin1String(want.label))
+                .arg(containing.minFrameRate(), 0, 'f', 0)
+                .arg(containing.maxFrameRate(), 0, 'f', 0)
+                .arg(want.fps));
+        return containing;
     }
     if (!bestJpeg.isNull())
         emit logLine("warn",
@@ -130,8 +157,17 @@ void PreviewEngine::start() {
                 stop();
             },
             Qt::QueuedConnection);
-    // Mirror the backend's real active state (start() is asynchronous).
+    // Mirror the backend's real active state (start() is asynchronous), and log
+    // the NEGOTIATED format once streaming — the honest ground truth of what the
+    // device is actually delivering (vs. what we requested).
     connect(m_camera.get(), &QCamera::activeChanged, this, [this](bool active) {
+        if (active && m_camera) {
+            const QCameraFormat f = m_camera->cameraFormat();
+            if (!f.isNull())
+                emit logLine("ok", QStringLiteral("preview: streaming %1x%2 @ %3–%4 fps (negotiated)")
+                                       .arg(f.resolution().width()).arg(f.resolution().height())
+                                       .arg(f.minFrameRate(), 0, 'f', 0).arg(f.maxFrameRate(), 0, 'f', 0));
+        }
         if (m_active == active) return;
         m_active = active;
         emit activeChanged();

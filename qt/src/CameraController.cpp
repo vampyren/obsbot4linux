@@ -16,6 +16,11 @@ constexpr int kAiSwitching = 6;
 
 const char *kFovLabels[] = {"Wide 86°", "Medium 78°", "Narrow 65°"};
 // (Preview resolutions live in PreviewFormats.h — shared with PreviewEngine.)
+
+// Settle delay before the automatic "return to preset after AI off" move: the
+// gimbal keeps disengaging from AI for ~1 s after the off command is accepted,
+// and an immediate position move gets eaten or truncated.
+constexpr int kAiReturnDelayMs = 1500;
 } // namespace
 
 CameraController::CameraController(QObject *parent) : QObject(parent) {
@@ -513,13 +518,29 @@ void CameraController::onWorkerResult(const QString &action, bool ok, int /*rc*/
         if (--m_aiInFlight <= 0) { m_aiInFlight = 0; m_aiPending = false; m_pendingTimer->stop(); }
         emit aiChanged();
         // "After AI off, go to preset": when turning AI Track OFF is confirmed and
-        // the user chose a return preset, recall it. Queued after the AI-off
-        // command (same worker thread), so the gimbal is released before the move.
+        // the user chose a return preset, recall it — after a settle delay. The
+        // gimbal is still physically disengaging from AI for ~1 s after the off
+        // command is accepted; an immediate move gets eaten or truncated (Rex's
+        // hardware finding: "moves a tiny bit" / doesn't reach the preset). Same
+        // fix pattern as the startup-preset delay. Re-checked at fire time in
+        // case AI was switched back on during the wait.
         const int rp = m_settings.aiReturnPreset;
         if (ok && action.endsWith("off") && !m_targetTracking
             && rp >= 1 && rp <= 3 && m_settings.presets[rp - 1].set) {
-            emit logLine("cmd", QStringLiteral("ai off: returning to preset %1").arg(rp));
-            goPreset(rp - 1);
+            emit logLine("cmd", QStringLiteral("ai off: returning to preset %1 in %2 ms (gimbal settle)")
+                                    .arg(rp).arg(kAiReturnDelayMs));
+            QTimer::singleShot(kAiReturnDelayMs, this, [this, rp]() {
+                if (!connected()) return;
+                if (asleep()) {
+                    emit logLine("warn", QStringLiteral("ai off: return to preset %1 skipped — camera asleep").arg(rp));
+                    return;
+                }
+                if (aiTracking()) {
+                    emit logLine("warn", QStringLiteral("ai off: return to preset %1 skipped — AI is on again").arg(rp));
+                    return;
+                }
+                goPreset(rp - 1);
+            });
         }
     } else if (action == QLatin1String("face focus")) {
         if (ok) m_faceFocus = m_targetFace;

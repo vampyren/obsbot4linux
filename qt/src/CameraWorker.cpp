@@ -13,6 +13,8 @@ namespace {
 // Gimbal safety clamps (degrees) — identical bounds to the validated GTK PoC.
 constexpr float kPitchMin = -90.0f, kPitchMax = 90.0f;
 constexpr float kYawMin = -120.0f, kYawMax = 120.0f;
+// Stale-AI-status grace after a confirmed AI-off (device pushes lag 2–3 s).
+constexpr qint64 kAiOffGraceMs = 4000;
 
 float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -180,6 +182,20 @@ void CameraWorker::onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr
     if (m_shuttingDown || !m_dev) return;
     // aiMode>0 means some AI mode is engaged (includes AiWorkModeSwitching=6).
     // Treating "switching" as tracking is the safe choice for the gimbal guard.
+    //
+    // Stale-push suppression: right after a confirmed "AI off" the device keeps
+    // reporting the old AI mode for up to a push cycle (2–3 s). Taking that at
+    // face value re-arms the AI-owns-gimbal guard and blocks the moves users
+    // expect immediately after turning AI off (incl. the automatic
+    // return-to-preset). Inside the grace window, an AI-on push is treated as
+    // stale: the guard stays released and the CORRECTED mode is forwarded so
+    // the UI doesn't flicker back to "on" either.
+    if (aiMode > Device::AiWorkModeNone
+        && m_aiOffGrace.isValid() && m_aiOffGrace.elapsed() < kAiOffGraceMs) {
+        aiMode = Device::AiWorkModeNone;   // stale — we KNOW the off command landed
+    } else if (aiMode <= Device::AiWorkModeNone) {
+        m_aiOffGrace.invalidate();         // device caught up; grace no longer needed
+    }
     m_aiTracking = (aiMode > Device::AiWorkModeNone);
 
     // Refresh real zoom from the getter (1.0–2.0). Runs on the worker thread,
@@ -361,7 +377,12 @@ void CameraWorker::cmdSetAi(int mode, int subMode, const QString &action) {
     // For Human tracking, subMode is the AiSubModeType framing (Normal/Upper/Close-up).
     const int rc = m_dev->cameraSetAiModeU(static_cast<Device::AiWorkModeType>(mode), subMode);
     const bool ok = (rc == RM_RET_OK);
-    if (ok) m_aiTracking = (mode != Device::AiWorkModeNone);   // optimistic; status push confirms
+    if (ok) {
+        m_aiTracking = (mode != Device::AiWorkModeNone);   // optimistic; status push confirms
+        // Open/close the stale-push grace window (see onSdkStatus).
+        if (mode == Device::AiWorkModeNone) m_aiOffGrace.start();
+        else                                m_aiOffGrace.invalidate();
+    }
     emit commandResult(action, ok, rc, ok ? QStringLiteral("applied") : QStringLiteral("rejected"));
     emit logLine(ok ? "ok" : "warn", QStringLiteral("%1  rc=%2").arg(action).arg(rc));
 }

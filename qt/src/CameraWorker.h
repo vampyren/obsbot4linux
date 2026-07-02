@@ -7,6 +7,7 @@
 // outlives its own event loop so no queued event ever lands on a dead object.
 #pragma once
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QString>
 
@@ -101,9 +102,16 @@ private:
     std::atomic<bool> m_shuttingDown{false};
 
     // Cached from the SDK status push; used only for the honest AI-owns-gimbal
-    // guard. Stale-but-safe: worst case a move is briefly blocked right after AI
-    // turns off, and the user retries. Never causes an unwanted move.
+    // guard. Never causes an unwanted move.
     bool m_aiTracking = false;
+    // Grace window after a CONFIRMED "AI off" command: the device's status push
+    // lags the command by a full push cycle (2–3 s), so a stale push still
+    // reporting an AI mode would flip m_aiTracking back on and reject the very
+    // moves users expect right after turning AI off (Rex's hardware finding:
+    // the automatic "return to preset after AI off" always landed in this
+    // window and got blocked/truncated). While the window is open, pushes
+    // claiming AI-on are treated as stale.
+    QElapsedTimer m_aiOffGrace;
 
     // Velocity-mode state (hold-to-move PTZ).
     bool m_velocityActive = false;         // true while a hold-drag is in progress
