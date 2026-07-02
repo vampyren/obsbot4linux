@@ -163,6 +163,7 @@ public slots:
     void rescan();
     void launchPreview();   // FALLBACK: (re)launch the external ffplay preview
     void stopPreview();     // terminate the ffplay preview (also called on shutdown)
+    void copyToClipboard(const QString &text);   // e.g. "Copy" on the Log page
 
     // VELOCITY (hold-to-move) PTZ — see CameraWorker for the safety-stop design.
     // pitchFrac/yawFrac in [-1,1]; scaled internally by the current speed setting.

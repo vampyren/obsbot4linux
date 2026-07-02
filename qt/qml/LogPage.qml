@@ -19,6 +19,20 @@ RowLayout {
                 Layout.fillWidth: true
                 SectionLabel { text: "Activity Log" }
                 Item { Layout.fillWidth: true }
+                // Copy the whole log as plain text (each line is also mouse-
+                // selectable in place).
+                ActionButton {
+                    text: "Copy"
+                    variant: "ghost"
+                    onClicked: {
+                        var out = ""
+                        for (var i = 0; i < root.logModel.count; ++i) {
+                            var e = root.logModel.get(i)
+                            out += e.ts + " " + e.kind.toUpperCase() + "  " + e.msg + "\n"
+                        }
+                        cam.copyToClipboard(out)
+                    }
+                }
                 ActionButton { text: "Rescan"; variant: "ghost"; onClicked: cam.rescan() }
             }
             LogView {

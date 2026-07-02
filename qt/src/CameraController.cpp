@@ -2,7 +2,9 @@
 #include "CameraWorker.h"
 #include "PreviewFormats.h"
 
+#include <QClipboard>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTimer>
@@ -367,6 +369,13 @@ void CameraController::launchPreview() {
                             .arg(QString::fromLatin1(pr.label)));
 }
 
+void CameraController::copyToClipboard(const QString &text) {
+    if (auto *cb = QGuiApplication::clipboard()) {
+        cb->setText(text);
+        emit logLine("sys", QStringLiteral("log copied to clipboard (%1 chars)").arg(text.size()));
+    }
+}
+
 void CameraController::stopPreview() {
     if (!m_previewProc) return;
     QProcess *p = m_previewProc;
@@ -434,6 +443,13 @@ void CameraController::onConnectionResolved(bool found, const QString &product, 
         QMetaObject::invokeMethod(m_worker, "cmdSetFov", Qt::QueuedConnection,
                                   Q_ARG(int, m_settings.fovIndex),
                                   Q_ARG(QString, QString::fromLatin1(kFovLabels[m_settings.fovIndex])));
+        // Re-apply the persisted gesture-control choice to the DEVICE. Restoring
+        // it only into the UI (constructor) left the chip showing ON while the
+        // camera actually had gesture off — gestures "didn't detect" all session
+        // unless the user re-toggled (Rex's hardware finding). rc is logged.
+        if (m_gesture)
+            QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
+                                      Q_ARG(bool, true));
         // Startup preset: move to the chosen preset on a GENUINE connect only —
         // after a delay so the gimbal's power-on centering finishes first (see
         // scheduleStartupPreset). A Rescan while already connected re-binds the

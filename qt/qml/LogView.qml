@@ -40,13 +40,19 @@ ListView {
             font.family: Theme.mono
             font.pixelSize: 12
         }
-        Text {
+        // TextEdit (read-only) instead of Text so the message is mouse-selectable
+        // for copy/paste; the Log page also has a "Copy" button for the full log.
+        TextEdit {
             text: line.msg
+            readOnly: true
+            selectByMouse: true
             color: Theme.dim
+            selectionColor: Theme.accent
+            selectedTextColor: "#0a0a0b"
             font.family: Theme.mono
             font.pixelSize: 12
             Layout.fillWidth: true
-            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+            wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
         }
     }
 
