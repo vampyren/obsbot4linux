@@ -182,7 +182,13 @@ void V4l2CaptureThread::run() {
                                 : QStringLiteral("poll error: %1").arg(QString::fromLocal8Bit(std::strerror(errno))));
             break;
         }
-        if (!(pfds[0].revents & POLLIN)) continue;   // woken by the pipe, not a frame
+        // Skip ONLY pure self-pipe wakeups. Device errors (unplug) surface as
+        // POLLERR/POLLHUP on the device fd, usually WITHOUT POLLIN — those must
+        // fall through to DQBUF so the real errno (ENODEV) is reported; a bare
+        // `continue` would busy-spin at 100% CPU (poll returns instantly with
+        // POLLERR forever) with the preview silently frozen.
+        if (!(pfds[0].revents & (POLLIN | POLLERR | POLLHUP | POLLNVAL)))
+            continue;                                // woken by the pipe, not the device
         v4l2_buffer b{};
         b.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         b.memory = V4L2_MEMORY_MMAP;
