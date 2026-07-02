@@ -1,10 +1,12 @@
 #include "PreviewEngine.h"
+#include "JpegDht.h"
 #include "PreviewFormats.h"
 
 #include <QDir>
 #include <QImage>
 #include <QVideoFrame>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 
@@ -33,6 +35,19 @@ constexpr int kMaxDecodeFailures = 30; // consecutive bad JPEGs before giving up
 // ---------------------------------------------------------------------------
 // V4l2CaptureThread — the blocking capture loop
 // ---------------------------------------------------------------------------
+V4l2CaptureThread::V4l2CaptureThread() {
+    // Self-pipe so requestStop() can wake a poll() that is waiting for a frame —
+    // without it, stopping a stalled stream would block for the full poll
+    // timeout (and a bounded join could time out, see teardownThread).
+    if (::pipe2(m_wake, O_CLOEXEC | O_NONBLOCK) != 0)
+        m_wake[0] = m_wake[1] = -1;   // degraded: stop still works via timeout
+}
+
+V4l2CaptureThread::~V4l2CaptureThread() {
+    if (m_wake[0] >= 0) ::close(m_wake[0]);
+    if (m_wake[1] >= 0) ::close(m_wake[1]);
+}
+
 void V4l2CaptureThread::configure(const QString &devPath, int w, int h, int fps,
                                   QVideoSink *sink) {
     m_devPath = devPath;
@@ -46,17 +61,25 @@ void V4l2CaptureThread::setSink(QVideoSink *sink) {
     m_sink = sink;
 }
 
+void V4l2CaptureThread::requestStop() {
+    m_stop.store(true);
+    if (m_wake[1] >= 0) {
+        const char b = 'x';
+        [[maybe_unused]] ssize_t n = ::write(m_wake[1], &b, 1);
+    }
+}
+
 void V4l2CaptureThread::run() {
     const QByteArray path = m_devPath.toLocal8Bit();
     const int fd = ::open(path.constData(), O_RDWR | O_CLOEXEC);
     if (fd < 0) {
-        emit failed(errno == EBUSY
-                        ? QStringLiteral("device busy — another app is using the camera")
-                        : QStringLiteral("cannot open %1: %2").arg(m_devPath,
-                              QString::fromLocal8Bit(std::strerror(errno))));
+        emit failed(QStringLiteral("cannot open %1: %2").arg(m_devPath,
+                        QString::fromLocal8Bit(std::strerror(errno))));
         emit stopped();
         return;
     }
+    // Note: uvcvideo allows multiple open()s — "another app is streaming"
+    // surfaces as EBUSY at S_FMT/REQBUFS below, not here.
 
     struct Guard {                    // cleanup on every exit path
         int fd;
@@ -83,7 +106,9 @@ void V4l2CaptureThread::run() {
     fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
     if (xioctl(fd, VIDIOC_S_FMT, &fmt) == -1) {
-        emit failed(QStringLiteral("S_FMT failed: %1").arg(QString::fromLocal8Bit(std::strerror(errno))));
+        emit failed(errno == EBUSY
+                        ? QStringLiteral("device busy — another app is using the camera")
+                        : QStringLiteral("S_FMT failed: %1").arg(QString::fromLocal8Bit(std::strerror(errno))));
         emit stopped();
         return;
     }
@@ -110,8 +135,15 @@ void V4l2CaptureThread::run() {
     req.count = kBufCount;
     req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     req.memory = V4L2_MEMORY_MMAP;
-    if (xioctl(fd, VIDIOC_REQBUFS, &req) == -1 || req.count < 2) {
-        emit failed(QStringLiteral("REQBUFS failed: %1").arg(QString::fromLocal8Bit(std::strerror(errno))));
+    if (xioctl(fd, VIDIOC_REQBUFS, &req) == -1) {
+        emit failed(errno == EBUSY
+                        ? QStringLiteral("device busy — another app is using the camera")
+                        : QStringLiteral("REQBUFS failed: %1").arg(QString::fromLocal8Bit(std::strerror(errno))));
+        emit stopped();
+        return;
+    }
+    if (req.count < 2) {   // ioctl OK but driver granted too few buffers — no errno here
+        emit failed(QStringLiteral("REQBUFS granted only %1 buffer(s)").arg(req.count));
         emit stopped();
         return;
     }
@@ -139,15 +171,18 @@ void V4l2CaptureThread::run() {
     emit negotiated(static_cast<int>(fmt.fmt.pix.width), static_cast<int>(fmt.fmt.pix.height), actualFps);
 
     int decodeFailures = 0;
+    bool dhtLogged = false;
     while (!m_stop.load()) {
-        pollfd pfd{fd, POLLIN, 0};
-        const int pr = ::poll(&pfd, 1, kPollTimeoutMs);
-        if (m_stop.load()) break;
+        pollfd pfds[2] = {{fd, POLLIN, 0}, {m_wake[0], POLLIN, 0}};
+        const int npfd = (m_wake[0] >= 0) ? 2 : 1;
+        const int pr = ::poll(pfds, static_cast<nfds_t>(npfd), kPollTimeoutMs);
+        if (m_stop.load()) break;   // requestStop() wrote the wake pipe (or flag raced poll)
         if (pr <= 0) {
             emit failed(pr == 0 ? QStringLiteral("stream stalled (no frame for %1 ms)").arg(kPollTimeoutMs)
                                 : QStringLiteral("poll error: %1").arg(QString::fromLocal8Bit(std::strerror(errno))));
             break;
         }
+        if (!(pfds[0].revents & POLLIN)) continue;   // woken by the pipe, not a frame
         v4l2_buffer b{};
         b.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         b.memory = V4L2_MEMORY_MMAP;
@@ -159,16 +194,30 @@ void V4l2CaptureThread::run() {
         }
 
         // Decode the JPEG frame (Qt's libjpeg plugin) and hand it to the sink.
-        // Occasional broken frames from UVC cams are normal — skip them, but
-        // give up honestly if NOTHING decodes.
+        // Many UVC cams emit MJPG without Huffman tables — libjpeg fails on
+        // those where ffmpeg silently fixes them up, so on failure retry with
+        // the standard tables spliced in (JpegDht.h). Occasional broken frames
+        // are normal — skip them, but give up honestly if NOTHING decodes.
         const auto *data = static_cast<const uchar *>(guard.maps[b.index]);
         QImage img = QImage::fromData(data, static_cast<int>(b.bytesused), "JPG");
+        if (img.isNull()) {
+            const QByteArray fixed = withStandardDht(data, static_cast<int>(b.bytesused));
+            if (!fixed.isEmpty()) {
+                img = QImage::fromData(fixed, "JPG");
+                if (!img.isNull() && !dhtLogged) {
+                    dhtLogged = true;
+                    emit negotiatedDht();
+                }
+            }
+        }
         if (!img.isNull()) {
             decodeFailures = 0;
-            QVideoSink *sink = nullptr;
-            { QMutexLocker lock(&m_sinkMutex); sink = m_sink.data(); }
-            if (sink)
-                sink->setVideoFrame(QVideoFrame(img));   // setVideoFrame is thread-safe
+            // Deliver WITH the mutex held: PreviewEngine clears the sink through
+            // this same mutex before the sink can be destroyed, so this cannot
+            // race the sink's destruction (setVideoFrame itself is thread-safe).
+            QMutexLocker lock(&m_sinkMutex);
+            if (QVideoSink *sink = m_sink.data())
+                sink->setVideoFrame(QVideoFrame(img));
         } else if (++decodeFailures >= kMaxDecodeFailures) {
             emit failed(QStringLiteral("cannot decode the MJPG stream (%1 bad frames in a row)")
                             .arg(decodeFailures));
@@ -216,8 +265,13 @@ void PreviewEngine::refreshDevice() {
     const QString oldPath = m_devPath;
     QString found;
 
-    const QStringList nodes = QDir(QStringLiteral("/dev"))
-                                  .entryList({QStringLiteral("video*")}, QDir::System | QDir::Files);
+    QStringList nodes = QDir(QStringLiteral("/dev"))
+                            .entryList({QStringLiteral("video*")}, QDir::System | QDir::Files);
+    // Numeric order (lexical puts video10 before video2) so the pick is stable
+    // across boots when several nodes exist.
+    std::sort(nodes.begin(), nodes.end(), [](const QString &a, const QString &b) {
+        return a.mid(5).toInt() < b.mid(5).toInt();
+    });
     for (const QString &n : nodes) {
         const QString path = QStringLiteral("/dev/") + n;
         const int fd = ::open(path.toLocal8Bit().constData(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
@@ -257,8 +311,12 @@ void PreviewEngine::teardownThread() {
     m_thread = nullptr;
     ++m_generation;                 // queued signals from this thread are now stale
     t->disconnect(this);
-    t->requestStop();
-    t->wait(2000);                  // poll() wakes within kPollTimeoutMs; 2 s is plenty
+    // Clear the sink FIRST, through the thread's mutex: after this returns the
+    // capture loop can never dereference the (possibly about-to-die) sink, even
+    // in the pathological leaked-thread case below.
+    t->setSink(nullptr);
+    t->requestStop();               // sets the flag AND wakes poll() via the self-pipe
+    t->wait(4000);                  // > kPollTimeoutMs so the bound holds even with no pipe
     if (t->isRunning()) {           // pathological: don't block the GUI forever
         connect(t, &QThread::finished, t, &QObject::deleteLater);
     } else {
@@ -283,9 +341,19 @@ void PreviewEngine::start() {
     connect(m_thread, &V4l2CaptureThread::negotiated, this,
             [this, gen](int w, int h, double fps) {
                 if (gen != m_generation) return;
-                emit logLine("ok", QStringLiteral("preview: streaming %1x%2 @ %3 fps (driver-confirmed)")
-                                       .arg(w).arg(h).arg(fps, 0, 'f', 0));
+                // Honest: only claim a rate the driver actually reported back.
+                emit logLine("ok", fps > 0.0
+                    ? QStringLiteral("preview: streaming %1x%2 @ %3 fps (driver-confirmed)")
+                          .arg(w).arg(h).arg(fps, 0, 'f', 0)
+                    : QStringLiteral("preview: streaming %1x%2 (driver did not report a rate)")
+                          .arg(w).arg(h));
                 if (!m_active) { m_active = true; emit activeChanged(); }
+            }, Qt::QueuedConnection);
+    connect(m_thread, &V4l2CaptureThread::negotiatedDht, this,
+            [this, gen]() {
+                if (gen != m_generation) return;
+                emit logLine("sys", QStringLiteral(
+                    "preview: frames lack Huffman tables (DHT) — splicing in the standard tables"));
             }, Qt::QueuedConnection);
     connect(m_thread, &V4l2CaptureThread::failed, this,
             [this, gen](const QString &why) {

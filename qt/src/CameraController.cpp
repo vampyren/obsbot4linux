@@ -447,9 +447,13 @@ void CameraController::onConnectionResolved(bool found, const QString &product, 
         // it only into the UI (constructor) left the chip showing ON while the
         // camera actually had gesture off — gestures "didn't detect" all session
         // unless the user re-toggled (Rex's hardware finding). rc is logged.
-        if (m_gesture)
+        // m_targetGesture must match, or the failure leg in onWorkerResult would
+        // "revert" to !false and confirm the chip ON — the very bug being fixed.
+        if (m_gesture) {
+            m_targetGesture = true;
             QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
                                       Q_ARG(bool, true));
+        }
         // Startup preset: move to the chosen preset on a GENUINE connect only —
         // after a delay so the gimbal's power-on centering finishes first (see
         // scheduleStartupPreset). A Rescan while already connected re-binds the

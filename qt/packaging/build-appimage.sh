@@ -90,6 +90,20 @@ export EXTRA_PLATFORM_PLUGINS="$EXTRA"
 # --- deploy dependencies into the AppDir (no AppImage yet) -------------------
 "$TOOLS/linuxdeploy-x86_64.AppImage" --appdir "$APPDIR" --plugin qt
 
+# The embedded preview decodes the camera's MJPG frames with QImage, which
+# needs Qt's JPEG imageformats plugin at runtime — linuxdeploy-plugin-qt does
+# not bundle it for a QML app (it only follows declared QML/module deps), and
+# without it the preview decodes ZERO frames inside the AppImage.
+QT_PLUGIN_DIR=$("$QMAKE_BIN" -query QT_INSTALL_PLUGINS)
+if [ -f "$QT_PLUGIN_DIR/imageformats/libqjpeg.so" ]; then
+    mkdir -p "$APPDIR/usr/plugins/imageformats"
+    cp -f "$QT_PLUGIN_DIR/imageformats/libqjpeg.so" "$APPDIR/usr/plugins/imageformats/"
+    echo ">> bundled imageformats/libqjpeg.so (MJPG preview decode)"
+else
+    echo "error: libqjpeg.so not found under $QT_PLUGIN_DIR — preview would not decode" >&2
+    exit 1
+fi
+
 # CRITICAL: prune host-provided system libraries so the TARGET distro's own,
 # ABI-matching copies are used. Bundling the GPU stack breaks GL context
 # creation; bundling the X11/xcb/xkbcommon stack (especially when the build host

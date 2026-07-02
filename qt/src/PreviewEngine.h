@@ -34,12 +34,15 @@
 class V4l2CaptureThread : public QThread {
     Q_OBJECT
 public:
+    V4l2CaptureThread();
+    ~V4l2CaptureThread() override;
     void configure(const QString &devPath, int w, int h, int fps, QVideoSink *sink);
     void setSink(QVideoSink *sink);              // thread-safe live re-target
-    void requestStop() { m_stop.store(true); }
+    void requestStop();                          // sets the flag AND wakes poll()
 
 signals:
-    void negotiated(int w, int h, double fps);   // driver readback after STREAMON
+    void negotiated(int w, int h, double fps);   // driver readback after STREAMON (fps<=0 = unknown)
+    void negotiatedDht();                        // frames lack DHT — standard tables spliced (once)
     void failed(const QString &why);             // open/ioctl/decode/stall error
     void stopped();                              // capture loop exited (any reason)
 
@@ -49,9 +52,14 @@ protected:
 private:
     QString m_devPath;
     int m_w = 1920, m_h = 1080, m_fps = 30;
-    QMutex m_sinkMutex;                          // guards m_sink (GUI writes, loop reads)
-    QPointer<QVideoSink> m_sink;                 // auto-nulls if the sink dies
+    // The sink is only ever dereferenced WITH this mutex held (the frame-deliver
+    // call included), and PreviewEngine clears it through the same mutex before
+    // the sink object can be destroyed — so the capture loop can never touch a
+    // dying sink, even if a pathological join timeout leaves the loop running.
+    QMutex m_sinkMutex;
+    QPointer<QVideoSink> m_sink;
     std::atomic<bool> m_stop{false};
+    int m_wake[2] = {-1, -1};                    // self-pipe: requestStop() wakes poll()
 };
 
 class PreviewEngine : public QObject {
