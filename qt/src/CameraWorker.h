@@ -60,6 +60,14 @@ public slots:
     void cmdGimbalVelocity(double pitchSpeed, double yawSpeed);
     void cmdGimbalStop();   // idempotent; safe to call anytime, incl. when not moving
 
+    // GESTURE DIAGNOSTIC (hardware finding: the Tiny 3 executes gestures
+    // autonomously when NO app session is attached, but goes gesture-deaf while
+    // this app runs — except one detection right after each connect). Quiet
+    // mode silences ALL periodic SDK traffic (status push subscription + the
+    // per-push zoom getter) for `seconds` while staying attached, to determine
+    // whether the traffic or the session itself suppresses the recognizer.
+    void cmdQuietMode(int seconds);
+
     // Deterministic teardown: disable the status callback, drop the device, and
     // stop the SDK discovery task. Invoked BlockingQueued from the controller
     // before the thread is quit — see CameraController::~CameraController.
@@ -100,6 +108,7 @@ private:
     int m_pollTimeoutMs = 6000;
     bool m_devChangedRegistered = false;
     std::atomic<bool> m_shuttingDown{false};
+    bool m_quiet = false;   // gesture diagnostic: drop status pushes while true
 
     // Cached from the SDK status push; used only for the honest AI-owns-gimbal
     // guard. Never causes an unwanted move.

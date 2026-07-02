@@ -88,12 +88,21 @@ RowLayout {
                 Text {
                     text: "AI Track is the tracking mode: the camera follows a person and keeps their face framed (LED turns blue; manual PTZ is blocked while it's on). "
                         + "Face autofocus just biases focus toward faces — it's independent of tracking and does NOT move the gimbal or the LED, so its effect is subtle. "
-                        + "Gesture control responds to hand gestures (often only while AI Track is on — check the Log page for the SDK result)."
+                        + "Gesture control (palm to start/stop tracking) is under investigation: the camera handles gestures fine on its own, but goes gesture-deaf while a control app is attached — use the test button below and check the Log page."
                     color: Theme.dimmer
                     font.family: Theme.sans
                     font.pixelSize: 13
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
+                }
+                // Diagnostic: pauses ALL periodic SDK traffic for 60 s so we can
+                // tell whether our status polling or the mere app session is what
+                // suppresses the camera's gesture recognizer.
+                ActionButton {
+                    text: "Gesture test: pause app traffic 60 s"
+                    variant: "ghost"
+                    enabled: cam.connected
+                    onClicked: cam.gestureQuietTest()
                 }
                 KeyValue { key: "tracking mode"; value: cam.connected ? cam.aiModeName : "—"; unknown: !cam.connected }
             }

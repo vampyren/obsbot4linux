@@ -180,6 +180,7 @@ void CameraWorker::sdkStatusTrampoline(void *param, const void *data) {
 
 void CameraWorker::onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr, int hdrSupport, int fps) {
     if (m_shuttingDown || !m_dev) return;
+    if (m_quiet) return;   // gesture diagnostic: no reads, no signals, no traffic
     // aiMode>0 means some AI mode is engaged (includes AiWorkModeSwitching=6).
     // Treating "switching" as tracking is the safe choice for the gimbal guard.
     //
@@ -561,6 +562,23 @@ void CameraWorker::cmdGimbalStop() {
         const int rc = m_dev->gimbalSpeedCtrlR(0.0, 0.0, 0.0);
         emit logLine(rc == RM_RET_OK ? "ok" : "warn", QStringLiteral("ptz velocity: stop rc=%1").arg(rc));
     }
+}
+
+void CameraWorker::cmdQuietMode(int seconds) {
+    const QString a = QStringLiteral("gesture quiet test");
+    if (!requireDevice(a)) return;
+    if (m_quiet) { emit logLine("warn", QStringLiteral("quiet test already running")); return; }
+    m_quiet = true;
+    m_dev->enableDevStatusCallback(false);   // stop the push; onSdkStatus also gates
+    emit logLine("cmd", QStringLiteral(
+        "quiet test: ALL periodic SDK traffic paused for %1 s — try palm gestures NOW "
+        "(status/zoom display will freeze meanwhile)").arg(seconds));
+    QTimer::singleShot(seconds * 1000, this, [this]() {
+        m_quiet = false;
+        if (!m_shuttingDown && m_dev)
+            m_dev->enableDevStatusCallback(true);
+        emit logLine("sys", QStringLiteral("quiet test: over — status traffic resumed"));
+    });
 }
 
 // ---------------------------------------------------------------------------

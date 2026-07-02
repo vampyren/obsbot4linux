@@ -158,6 +158,7 @@ public slots:
     void setAiTracking(bool on);      // Human tracking on/off (the real Tiny3 tracking)
     void setFaceFocus(bool on);       // face autofocus on/off (independent — no gimbal motion)
     void setGesture(bool on);         // gesture control on/off
+    void gestureQuietTest();          // 60 s SDK-traffic pause (gesture diagnostic)
     void setHdr(bool on);             // HDR/WDR on/off (only when capHdr)
     void setImageParam(const QString &param, int value);  // brightness/contrast/saturation/sharpness
     void rescan();

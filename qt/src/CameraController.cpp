@@ -329,6 +329,14 @@ void CameraController::setImageParam(const QString &param, int value) {
                               Q_ARG(QString, param), Q_ARG(int, value));
 }
 
+void CameraController::gestureQuietTest() {
+    // Diagnostic (hardware finding): the camera does gestures autonomously with
+    // no app attached but goes gesture-deaf while this app runs. This pauses
+    // ALL periodic SDK traffic for 60 s to find out whether the traffic or the
+    // mere session suppresses the recognizer.
+    QMetaObject::invokeMethod(m_worker, "cmdQuietMode", Qt::QueuedConnection, Q_ARG(int, 60));
+}
+
 void CameraController::rescan() {
     m_connState = Discovering;
     emit connStateChanged();
