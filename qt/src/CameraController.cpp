@@ -16,6 +16,8 @@ constexpr int kAiNone = 0;    // AiWorkModeNone
 constexpr int kAiHuman = 2;   // AiWorkModeHuman (single-person tracking)
 constexpr int kAiSwitching = 6;
 
+// NOTE: contains a UTF-8 degree sign — convert with fromUtf8, never fromLatin1
+// (fromLatin1 renders it as the "78Â°" mojibake Rex saw in the log).
 const char *kFovLabels[] = {"Wide 86°", "Medium 78°", "Narrow 65°"};
 // (Preview resolutions live in PreviewFormats.h — shared with PreviewEngine.)
 
@@ -199,7 +201,7 @@ void CameraController::setFovIndex(int idx) {
     }
     if (connected())
         QMetaObject::invokeMethod(m_worker, "cmdSetFov", Qt::QueuedConnection,
-                                  Q_ARG(int, idx), Q_ARG(QString, QString::fromLatin1(kFovLabels[idx])));
+                                  Q_ARG(int, idx), Q_ARG(QString, QString::fromUtf8(kFovLabels[idx])));
 }
 void CameraController::setAiReturnPreset(int p) {
     if (p < 0 || p > 3 || p == m_settings.aiReturnPreset) return;
@@ -442,17 +444,23 @@ void CameraController::onConnectionResolved(bool found, const QString &product, 
         // Align the device's FOV with the restored UI setting (benign, no motion).
         QMetaObject::invokeMethod(m_worker, "cmdSetFov", Qt::QueuedConnection,
                                   Q_ARG(int, m_settings.fovIndex),
-                                  Q_ARG(QString, QString::fromLatin1(kFovLabels[m_settings.fovIndex])));
+                                  Q_ARG(QString, QString::fromUtf8(kFovLabels[m_settings.fovIndex])));
         // Re-apply the persisted gesture-control choice to the DEVICE. Restoring
         // it only into the UI (constructor) left the chip showing ON while the
         // camera actually had gesture off — gestures "didn't detect" all session
         // unless the user re-toggled (Rex's hardware finding). rc is logged.
         // m_targetGesture must match, or the failure leg in onWorkerResult would
         // "revert" to !false and confirm the chip ON — the very bug being fixed.
+        // Delayed like the startup preset: right at connect the device still
+        // eats commands (rc=0 but no effect) — the same too-early window that
+        // forces kAiReturnDelayMs and the 1600 ms preset settle.
         if (m_gesture) {
-            m_targetGesture = true;
-            QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
-                                      Q_ARG(bool, true));
+            QTimer::singleShot(kAiReturnDelayMs, this, [this]() {
+                if (!connected() || !m_gesture) return;
+                m_targetGesture = true;
+                QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
+                                          Q_ARG(bool, true));
+            });
         }
         // Startup preset: move to the chosen preset on a GENUINE connect only —
         // after a delay so the gimbal's power-on centering finishes first (see
