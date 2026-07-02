@@ -1,0 +1,38 @@
+#!/bin/sh
+# Repo-root launcher for the OBSBOT Tiny 3 Command Center (Qt 6 / QML).
+#
+# POSIX sh so it works under bash/zsh/fish alike:  ./obsbot4linux
+#
+# It configures + builds the Qt app with CMake on first run, then launches it.
+# The binary carries a repo-local rpath to the vendored SDK; we also export
+# LD_LIBRARY_PATH as a fallback. No global SDK install, no sudo.
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+# cd to the repo root so the app's repo-local config path (./config/...) resolves
+# here regardless of where the launcher was invoked from.
+cd "$SCRIPT_DIR"
+
+QT_DIR="$SCRIPT_DIR/qt"
+BUILD_DIR="$QT_DIR/build"
+SDK_LIB="$SCRIPT_DIR/sdk/libdev_v2.1.0_8/linux/x86_64-release"
+BIN="$BUILD_DIR/obsbot4linux"
+
+if [ ! -x "$BIN" ]; then
+    echo "Building the Qt app (first run) ..."
+    if ! command -v cmake >/dev/null 2>&1; then
+        echo "error: cmake not found. See qt/README.md for the required packages." >&2
+        exit 1
+    fi
+    cmake -S "$QT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$BUILD_DIR" -j
+fi
+
+export LD_LIBRARY_PATH="$SDK_LIB:${LD_LIBRARY_PATH:-}"
+
+# Prefer native Wayland; fall back to xcb if the Wayland platform plugin is
+# unavailable. Respect an explicit override (e.g. QT_QPA_PLATFORM=xcb).
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}"
+
+exec "$BIN" "$@"

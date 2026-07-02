@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- OBSBOT Tiny 3 Control — coral ring glyph on obsidian (scalable source). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e06c75" stop-opacity="0.55"/>
+      <stop offset="70%" stop-color="#e06c75" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#e06c75" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="1" y="1" width="254" height="254" rx="56" fill="#12151b" stroke="#2a313c" stroke-width="2"/>
+  <circle cx="128" cy="128" r="86" fill="url(#glow)"/>
+  <circle cx="128" cy="128" r="66" fill="none" stroke="#e06c75" stroke-width="22"/>
+  <circle cx="128" cy="128" r="22" fill="#ea8b92"/>
+</svg>

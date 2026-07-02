@@ -1,0 +1,33 @@
+# ---------------------------------------------------------------------------
+# OBSBOT SDK — proprietary; present locally under sdk/ but NOT redistributed.
+# The whole sdk/ folder is excluded from the repo. See docs/INSTALL.md for how
+# to obtain it and where to place it.
+# ---------------------------------------------------------------------------
+sdk/
+libdev_v2_1_0_8.zip
+# (legacy pre-move location, in case an old checkout still has it)
+libdev_v2.1.0_8/
+
+# macOS cruft from the SDK zip extraction
+.DS_Store
+__MACOSX/
+
+# Build outputs
+sdk-probe/obsbot-sdk-probe
+sdk-probe/build/
+gui/obsbot-tiny3-control-bin
+gui/poll_logic_test
+gui/build/
+*.o
+
+# Qt app build outputs
+qt/build/
+
+# AppImage packaging artifacts
+qt/build-appimage/
+qt/AppDir/
+qt/packaging/tools/
+*.AppImage
+
+# AppImage output
+dist/

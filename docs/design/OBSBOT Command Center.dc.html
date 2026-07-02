@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/penelope-design-system-fc9e30bb-e65b-45fc-a4ec-8a627d310885/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/penelope-design-system-fc9e30bb-e65b-45fc-a4ec-8a627d310885/tokens/colors.css">
+<link rel="stylesheet" href="_ds/penelope-design-system-fc9e30bb-e65b-45fc-a4ec-8a627d310885/tokens/typography.css">
+<link rel="stylesheet" href="_ds/penelope-design-system-fc9e30bb-e65b-45fc-a4ec-8a627d310885/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/penelope-design-system-fc9e30bb-e65b-45fc-a4ec-8a627d310885/tokens/motion.css">
+<link rel="stylesheet" href="_ds/penelope-design-system-fc9e30bb-e65b-45fc-a4ec-8a627d310885/base/utilities.css">
+<link rel="stylesheet" href="_ds/penelope-design-system-fc9e30bb-e65b-45fc-a4ec-8a627d310885/styles.css">
+<script src="_ds/penelope-design-system-fc9e30bb-e65b-45fc-a4ec-8a627d310885/_ds_bundle.js"></script>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  @keyframes ping { 0% { transform: scale(0.5); opacity: 0.85; } 80%, 100% { transform: scale(1.75); opacity: 0; } }
+  html, body { background: var(--bg); }
+  select option { background: #111318; color: #f4f4f5; }
+  input[type=range] { height: 4px; }
+</style>
+</helmet>
+<section style="display:flex;flex-wrap:wrap;gap:56px;padding:64px 64px 120px;align-items:flex-start;font-family:var(--font-prose);color:var(--fg);background:radial-gradient(1400px 700px at 30% -10%, rgba(224,108,117,0.05), transparent 70%), var(--bg);min-height:100vh;">
+
+  <div id="1b" style="display:flex;flex-direction:column;gap:14px;flex:0 0 auto;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div><div style="font-size:15px;font-weight:600;">OBSBOT Command Center</div><div style="font-size:12px;color:var(--fg-dim);">Console · Tiny 3 PTZ</div></div>
+    </div>
+    <div style="width:1180px;height:748px;display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:0 44px 130px -46px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.02);">
+      <div style="height:38px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:rgba(255,255,255,0.022);border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:9px;">
+          <div style="width:16px;height:16px;border-radius:50%;border:2.5px solid var(--accent);display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px -2px var(--accent-ring);"><div style="width:4px;height:4px;border-radius:50%;background:var(--accent);"></div></div>
+          <span style="font-family:var(--font-chrome);font-size:12px;color:var(--fg-dim);letter-spacing:0.02em;">OBSBOT Tiny 3 Control</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:15px;color:var(--fg-dimmer);">
+          <span style="font-family:var(--font-chrome);font-size:15px;line-height:1;">–</span><span style="font-family:var(--font-chrome);font-size:11px;">▢</span><span style="font-family:var(--font-chrome);font-size:12px;">✕</span>
+        </div>
+      </div>
+      <div style="flex:1;min-height:0;">{{ bodyB }}</div>
+    </div>
+  </div>
+
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    conn: 'connected', run: 'sleep',
+    pan: 0, tilt: 0, joyX: 0, joyY: 0, zoom: 1.0, step: '5°', speed: 'Slow', ai: 'off', fov: '86°',
+    presets: [
+      { set: true, pan: -0.35, tilt: 0.12, zoom: 1.30, name: 'Desk wide' },
+      { set: false }, { set: false }
+    ],
+    activePreset: null,
+    brightness: 52, contrast: 50, saturation: 48, sharpen: 45,
+    wb: 'auto', wbTemp: 5600, exposure: 'Auto', hdr: false,
+    trackMode: 'upper', trackSpeed: 'standard', zone: 'Auto', sensitivity: 62, gesture: true,
+    drag: false,
+    v1advOpen: true, v1tab: 'image',
+    v2nav: 'control',
+    v3drawer: false, v3tab: 'image',
+    log: [
+      { k: 'net', t: '12:40:24', m: 'discovery: started (USB, timeout 6000 ms)' },
+      { k: 'net', t: '12:40:25', m: 'discovery: polling for device … (1000/6000 ms)' },
+      { k: 'net', t: '12:40:26', m: 'discovery: polling for device … (2000/6000 ms)' },
+      { k: 'net', t: '12:40:27', m: 'discovery: polling for device … (3000/6000 ms)' },
+      { k: 'ok',  t: '12:40:28', m: 'discovery: resolved (SN <redacted-SN>, Tiny3, fw 6.6.9.1)' },
+      { k: 'ok',  t: '12:40:28', m: 'connected: OBSBOT_<redacted-SN>' },
+      { k: 'sys', t: '12:40:28', m: 'status push (ai_mode=0, run=sleep)' }
+    ]
+  };
+
+  isConnected() { return this.state.conn === 'connected'; }
+  isAsleep() { return this.isConnected() && this.state.run === 'sleep'; }
+  zoomLabel() { return this.state.zoom.toFixed(2) + 'x'; }
+
+  componentDidMount() { this._scroll(); }
+  componentDidUpdate() { this._scroll(); }
+  _scroll() { ['log-a', 'log-b', 'log-c'].forEach(id => { const e = document.getElementById(id); if (e) e.scrollTop = e.scrollHeight; }); }
+
+  pushLog(k, m) { const t = new Date().toLocaleTimeString('en-GB'); this.setState(s => ({ log: [...s.log, { k, t, m }].slice(-80) })); }
+
+  doWake() { this.setState({ run: 'awake' }, () => this.pushLog('ok', 'run state → awake')); }
+  doSleep() { this.setState({ run: 'sleep' }, () => this.pushLog('warn', 'run state → sleep')); }
+  doCenter() { this.setState({ pan: 0, tilt: 0, activePreset: null }, () => this.pushLog('cmd', 'gimbal → center (home)')); }
+  nudge(dx, dy) {
+    if (!this.isConnected()) return;
+    const s = 0.14;
+    this.setState(st => ({ pan: Math.max(-1, Math.min(1, +(st.pan + dx * s).toFixed(3))), tilt: Math.max(-1, Math.min(1, +(st.tilt + dy * s).toFixed(3))) }),
+      () => this.pushLog('cmd', 'move ' + (dy < 0 ? 'up' : dy > 0 ? 'down' : dx < 0 ? 'left' : 'right') + ' ' + this.state.step));
+  }
+  zoomBy(d) { if (!this.isConnected()) return; this.setState(st => ({ zoom: Math.max(1, Math.min(2, +(st.zoom + d).toFixed(2))) }), () => this.pushLog('cmd', 'zoom ' + this.zoomLabel())); }
+  zoomReset() { this.setState({ zoom: 1 }, () => this.pushLog('cmd', 'zoom reset 1.00x')); }
+  setAI(v) { this.setState({ ai: v }, () => this.pushLog('cmd', 'ai_mode → ' + v)); }
+  setConn(v) { this.setState({ conn: v }, () => this.pushLog(v === 'connected' ? 'ok' : v === 'discovering' ? 'net' : 'warn', v === 'connected' ? 'link up · device online' : v === 'discovering' ? 'discovery: scanning /dev/video* …' : 'link down · no device')); }
+
+  presetGo(i) { const p = this.state.presets[i]; if (!p.set) return; this.setState({ pan: p.pan, tilt: p.tilt, zoom: p.zoom, activePreset: i }, () => this.pushLog('cmd', 'preset ' + (i + 1) + ' recall')); }
+  presetSave(i) { this.setState(st => { const ps = st.presets.slice(); ps[i] = { ...ps[i], set: true, pan: st.pan, tilt: st.tilt, zoom: st.zoom, name: ps[i].name || ('Preset ' + (i + 1)) }; return { presets: ps }; }, () => this.pushLog('ok', 'preset ' + (i + 1) + ' saved')); }
+  presetClear(i) { this.setState(st => { const ps = st.presets.slice(); ps[i] = { set: false }; return { presets: ps, activePreset: st.activePreset === i ? null : st.activePreset }; }); }
+  presetName(i, v) { this.setState(st => { const ps = st.presets.slice(); ps[i] = { ...ps[i], name: v }; return { presets: ps }; }); }
+  saveNew() { const i = this.state.presets.findIndex(p => !p.set); if (i >= 0) this.presetSave(i); }
+
+  componentWillUnmount() { if (this._raf) cancelAnimationFrame(this._raf); }
+  puckDown(e) {
+    if (!this.isConnected()) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    // Joystick: deflection drives pan/tilt velocity; knob springs back to center on release.
+    const upd = (ev) => {
+      const nx = Math.max(-1, Math.min(1, ((ev.clientX - rect.left) / rect.width * 2 - 1)));
+      const ny = Math.max(-1, Math.min(1, ((ev.clientY - rect.top) / rect.height * 2 - 1)));
+      this.setState({ joyX: +nx.toFixed(3), joyY: +ny.toFixed(3) });
+    };
+    upd(e); this.setState({ drag: true });
+    this._lastT = performance.now();
+    const tick = (now) => {
+      const dt = Math.min(0.05, (now - this._lastT) / 1000); this._lastT = now;
+      const { joyX, joyY } = this.state;
+      if (joyX || joyY) {
+        const rate = 1.1;
+        this.setState(st => ({ pan: Math.max(-1, Math.min(1, +(st.pan + joyX * rate * dt).toFixed(3))), tilt: Math.max(-1, Math.min(1, +(st.tilt + joyY * rate * dt).toFixed(3))) }));
+      }
+      this._raf = requestAnimationFrame(tick);
+    };
+    this._raf = requestAnimationFrame(tick);
+    const move = (ev) => upd(ev);
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); if (this._raf) cancelAnimationFrame(this._raf); this.setState({ drag: false, joyX: 0, joyY: 0 }); this.pushLog('cmd', 'ptz → pan ' + Math.round(this.state.pan * 90) + '° tilt ' + Math.round(-this.state.tilt * 90) + '°'); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  }
+
+  // ── tiny style helpers ────────────────────────────────
+  ov(color, ls) { return { fontSize: 11, textTransform: 'uppercase', letterSpacing: ls || '0.22em', color, fontFamily: 'var(--font-chrome)' }; }
+  lbl(t) { const h = React.createElement; return h('span', { style: { fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.14em', color: 'var(--fg-dimmer)', fontFamily: 'var(--font-chrome)' } }, t); }
+  sectionLabel(t) { const h = React.createElement; return h('div', { style: { fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.2em', color: 'var(--fg-dimmer)', fontFamily: 'var(--font-chrome)', marginBottom: 12 } }, t); }
+  panelWrap(children, pad, style) { const h = React.createElement; return h('div', { className: 'panel', style: { padding: pad || 16, ...(style || {}) } }, children); }
+  divider() { const h = React.createElement; return h('div', { style: { height: 1, background: 'var(--border)', margin: '2px 0' } }); }
+  rowC(label, control) { const h = React.createElement; return h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, minHeight: 32 } }, this.lbl(label), control); }
+
+  icon(name, s) {
+    s = s || 16; const h = React.createElement;
+    const g = {
+      sun: [h('circle', { key: 'c', cx: 12, cy: 12, r: 4 }), h('path', { key: 'p', d: 'M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4' })],
+      moon: [h('path', { key: 1, d: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z' })],
+      target: [h('circle', { key: 1, cx: 12, cy: 12, r: 9 }), h('circle', { key: 2, cx: 12, cy: 12, r: 3 }), h('path', { key: 3, d: 'M12 1v3M12 20v3M1 12h3M20 12h3' })],
+      minus: [h('path', { key: 1, d: 'M5 12h14' })],
+      plus: [h('path', { key: 1, d: 'M12 5v14M5 12h14' })],
+      refresh: [h('path', { key: 1, d: 'M3 2v6h6' }), h('path', { key: 2, d: 'M3.5 9a9 9 0 1 1-.5 4.5' })],
+      sliders: [h('path', { key: 1, d: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3' }), h('path', { key: 2, d: 'M1 14h6M9 8h6M17 16h6' })],
+      crosshair: [h('circle', { key: 1, cx: 12, cy: 12, r: 9 }), h('path', { key: 2, d: 'M22 12h-4M6 12H2M12 6V2M12 22v-4' })],
+      bookmark: [h('path', { key: 1, d: 'M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z' })],
+      terminal: [h('path', { key: 1, d: 'M4 17l6-6-6-6' }), h('path', { key: 2, d: 'M12 19h8' })],
+      grid: [h('rect', { key: 1, x: 3, y: 3, width: 7, height: 7, rx: 1 }), h('rect', { key: 2, x: 14, y: 3, width: 7, height: 7, rx: 1 }), h('rect', { key: 3, x: 14, y: 14, width: 7, height: 7, rx: 1 }), h('rect', { key: 4, x: 3, y: 14, width: 7, height: 7, rx: 1 })],
+      videoOff: [h('path', { key: 1, d: 'M16 16H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2' }), h('path', { key: 2, d: 'M22 8l-6 4 6 4V8z' }), h('path', { key: 3, d: 'M2 2l20 20' })],
+      chevronUp: [h('path', { key: 1, d: 'M18 15l-6-6-6 6' })],
+      chevronDown: [h('path', { key: 1, d: 'M6 9l6 6 6-6' })],
+      chevronLeft: [h('path', { key: 1, d: 'M15 18l-6-6 6-6' })],
+      chevronRight: [h('path', { key: 1, d: 'M9 18l6-6-6-6' })],
+      x: [h('path', { key: 1, d: 'M18 6L6 18M6 6l12 12' })],
+      zap: [h('path', { key: 1, d: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' })]
+    };
+    return h('svg', { width: s, height: s, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round', style: { display: 'block', flexShrink: 0 } }, g[name] || []);
+  }
+
+  obsGlyph(sz) { const h = React.createElement; return h('div', { style: { width: sz, height: sz, borderRadius: '50%', border: (sz > 20 ? 3 : 2) + 'px solid var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 12px -2px var(--accent-ring)' } }, h('div', { style: { width: sz * 0.28, height: sz * 0.28, borderRadius: '50%', background: 'var(--accent)' } })); }
+
+  logColor(k) { return { sys: 'var(--fg-dim)', ok: 'var(--status-live)', warn: 'var(--status-degraded)', net: 'var(--status-busy)', cmd: 'var(--accent-soft)', err: 'var(--status-offline)' }[k] || 'var(--fg-dim)'; }
+
+  // ── controls ──────────────────────────────────────────
+  seg(items, val, onPick, opts) {
+    const h = React.createElement; opts = opts || {};
+    return h('div', { style: { display: 'inline-flex', padding: 3, gap: 3, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8 } },
+      items.map(it => { const on = it.v === val; return h('button', { key: it.v, onClick: () => { if (!opts.disabled) onPick(it.v); }, disabled: opts.disabled, style: { border: 'none', cursor: opts.disabled ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-chrome)', fontSize: 12, letterSpacing: '0.02em', padding: '5px 11px', borderRadius: 6, background: on ? 'var(--accent-tint)' : 'transparent', color: on ? 'var(--accent-soft)' : 'var(--fg-dim)', boxShadow: on ? 'inset 0 0 0 1px var(--accent-deep)' : 'none', opacity: opts.disabled ? 0.5 : 1, transition: 'all .15s' } }, it.label); }));
+  }
+
+  selNode(key, opts, disabled) {
+    const h = React.createElement;
+    return h('select', { value: this.state[key], disabled, onChange: e => this.setState({ [key]: e.target.value }), className: 'field-input', style: { height: 32, padding: '0 10px', fontSize: 12.5, width: 'auto', minWidth: 76, cursor: disabled ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-chrome)', opacity: disabled ? 0.5 : 1 } }, opts.map(o => h('option', { key: o, value: o }, o)));
+  }
+
+  switch(on, onToggle) {
+    const h = React.createElement;
+    return h('button', { onClick: onToggle, style: { width: 44, height: 24, borderRadius: 999, border: '1px solid ' + (on ? 'var(--accent-deep)' : 'var(--border)'), background: on ? 'var(--accent-tint)' : 'var(--bg-elevated)', position: 'relative', cursor: 'pointer', transition: 'all .18s', padding: 0, flexShrink: 0 } },
+      h('span', { style: { position: 'absolute', top: 2, left: on ? 22 : 2, width: 18, height: 18, borderRadius: '50%', background: on ? 'linear-gradient(180deg,var(--accent-soft),var(--accent))' : 'var(--fg-dimmer)', transition: 'left .18s var(--ease-out)', boxShadow: on ? '0 0 8px var(--accent-ring)' : 'none' } }));
+  }
+
+  sliderRow(label, key, min, max, step, unit, disabled) {
+    const h = React.createElement; const v = this.state[key];
+    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 7, opacity: disabled ? 0.45 : 1 } },
+      h('div', { style: { display: 'flex', justifyContent: 'space-between' } }, this.lbl(label), h('span', { className: 'metric', style: { fontSize: 12, color: 'var(--fg)' } }, v + (unit || ''))),
+      h('input', { type: 'range', min, max, step, value: v, disabled, onInput: e => this.setState({ [key]: +e.target.value }), style: { width: '100%', accentColor: 'var(--accent)', cursor: disabled ? 'not-allowed' : 'pointer' } }));
+  }
+
+  toggleRow(label, key, desc) {
+    const h = React.createElement; const on = this.state[key];
+    return h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 } },
+      h('div', {}, this.lbl(label), desc ? h('div', { style: { fontSize: 11.5, color: 'var(--fg-dimmer)', marginTop: 3, fontFamily: 'var(--font-prose)', letterSpacing: 0, textTransform: 'none' } }, desc) : null),
+      this.switch(on, () => this.setState({ [key]: !on })));
+  }
+
+  stBtn(label, ic, active, color, onClick, disabled, extra) {
+    const h = React.createElement;
+    return h('button', { onClick, disabled, className: 'btn btn-sm', style: { background: active ? 'color-mix(in srgb, ' + color + ' 16%, transparent)' : 'linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.025))', color: active ? color : 'var(--fg)', border: '1px solid ' + (active ? color : 'rgba(255,255,255,0.14)'), boxShadow: active ? '0 0 14px -4px ' + color : 'var(--shadow-card)', ...(extra || {}) } }, this.icon(ic, 15), label);
+  }
+
+  powerRow() {
+    const h = React.createElement; const dis = !this.isConnected(); const sleep = this.state.run === 'sleep';
+    return h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+      this.stBtn('Wake', 'sun', !sleep && !dis, 'var(--status-live)', () => this.doWake(), dis),
+      this.stBtn('Sleep', 'moon', sleep && !dis, 'var(--status-degraded)', () => this.doSleep(), dis),
+      h('button', { onClick: () => this.doCenter(), disabled: dis, className: 'btn btn-secondary btn-sm' }, this.icon('target', 15), 'Center'));
+  }
+
+  zoomRow() {
+    const h = React.createElement; const dis = !this.isConnected();
+    return h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+      h('span', { style: { fontSize: 11, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--fg-dimmer)', fontFamily: 'var(--font-chrome)', marginRight: 2 } }, 'Zoom'),
+      h('button', { onClick: () => this.zoomBy(-0.1), disabled: dis, className: 'btn btn-secondary btn-sm btn-square' }, this.icon('minus', 16)),
+      h('span', { className: 'metric', style: { minWidth: 58, textAlign: 'center', fontSize: 14, color: 'var(--fg)' } }, this.zoomLabel()),
+      h('button', { onClick: () => this.zoomBy(0.1), disabled: dis, className: 'btn btn-secondary btn-sm btn-square' }, this.icon('plus', 16)),
+      h('button', { onClick: () => this.zoomReset(), disabled: dis, className: 'btn btn-ghost btn-sm' }, '1x'));
+  }
+
+  moveRow() {
+    const h = React.createElement; const dis = !this.isConnected();
+    return h('div', { style: { display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' } },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, this.lbl('Step'), this.selNode('step', ['1°', '5°', '10°', '15°'], dis)),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, this.lbl('Speed'), this.selNode('speed', ['Slow', 'Standard', 'Fast'], dis)));
+  }
+
+  cameraRow() {
+    const h = React.createElement; const dis = !this.isConnected();
+    const grow = { flex: 1, justifyContent: 'center' };
+    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } }, this.lbl('FOV'), this.selNode('fov', ['86°', '78°', '65°'], dis)),
+      h('div', { style: { display: 'flex', alignItems: 'stretch', gap: 8 } },
+        this.stBtn('AI Track', 'crosshair', this.state.ai === 'track', 'var(--status-busy)', () => this.setAI(this.state.ai === 'track' ? 'off' : 'track'), dis, grow),
+        this.stBtn('Face focus', 'zap', this.state.ai === 'face', 'var(--status-busy)', () => this.setAI(this.state.ai === 'face' ? 'off' : 'face'), dis, grow)));
+  }
+
+  presetRow() {
+    const h = React.createElement; const dis = !this.isConnected();
+    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+      this.state.presets.map((p, i) => h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8 } },
+        h('span', { style: { width: 26, fontSize: 12, fontFamily: 'var(--font-chrome)', color: p.active ? 'var(--accent-soft)' : 'var(--fg-dim)' } }, 'P' + (i + 1)),
+        h('button', { onClick: () => this.presetSave(i), disabled: dis, className: 'btn btn-secondary btn-sm', style: { flex: 1 } }, 'Save'),
+        h('button', { onClick: () => this.presetGo(i), disabled: dis || !p.set, className: 'btn btn-sm', style: { flex: 1, background: p.set ? 'linear-gradient(180deg,var(--accent-soft),var(--accent))' : 'transparent', color: p.set ? '#fff' : 'var(--fg-dim)', border: '1px solid ' + (p.set ? 'var(--accent-deep)' : 'var(--border)') } }, 'Go')
+      )));
+  }
+
+  ptz(size) {
+    const h = React.createElement; const S = this.state; const dis = !this.isConnected();
+    const R = size / 2 - 18; const kx = S.joyX * R, ky = S.joyY * R;
+    const arrow = (ic, gc, gr, dx, dy) => h('button', { key: ic, onClick: () => this.nudge(dx, dy), disabled: dis, className: 'btn btn-secondary btn-sm btn-square', style: { gridColumn: gc, gridRow: gr } }, this.icon(ic, 16));
+    return h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 } },
+      h('div', { onPointerDown: dis ? undefined : (e) => this.puckDown(e), style: { position: 'relative', width: size, height: size, borderRadius: '50%', border: '1px solid var(--border)', background: 'radial-gradient(circle at 50% 50%, rgba(224,108,117,0.06), transparent 68%), var(--bg-elevated)', cursor: dis ? 'not-allowed' : (S.drag ? 'grabbing' : 'grab'), opacity: dis ? 0.45 : 1, touchAction: 'none', userSelect: 'none' } },
+        h('div', { style: { position: 'absolute', left: '50%', top: 10, bottom: 10, width: 1, background: 'var(--border)', transform: 'translateX(-0.5px)' } }),
+        h('div', { style: { position: 'absolute', top: '50%', left: 10, right: 10, height: 1, background: 'var(--border)', transform: 'translateY(-0.5px)' } }),
+        h('div', { style: { position: 'absolute', inset: size * 0.26, borderRadius: '50%', border: '1px dashed rgba(255,255,255,0.08)' } }),
+        h('div', { style: { position: 'absolute', left: '50%', top: '50%', width: 24, height: 24, marginLeft: -12, marginTop: -12, borderRadius: '50%', background: 'linear-gradient(180deg,var(--accent-soft),var(--accent))', border: '1px solid var(--accent-deep)', boxShadow: '0 0 16px -2px var(--accent-ring), inset 0 1px 0 rgba(255,255,255,0.35)', transform: 'translate(' + kx + 'px,' + ky + 'px)', transition: S.drag ? 'none' : 'transform 0.22s var(--ease-out)' } })
+      ),
+      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3,32px)', gridTemplateRows: 'repeat(3,32px)', gap: 5 } },
+        arrow('chevronUp', 2, 1, 0, -1),
+        arrow('chevronLeft', 1, 2, -1, 0),
+        h('button', { key: 'ctr', onClick: () => this.doCenter(), disabled: dis, className: 'btn btn-sm btn-square', style: { gridColumn: 2, gridRow: 2, border: '1px solid var(--accent-deep)', background: 'var(--accent-tint)', color: 'var(--accent-soft)' } }, this.icon('target', 15)),
+        arrow('chevronRight', 3, 2, 1, 0),
+        arrow('chevronDown', 2, 3, 0, 1)
+      ));
+  }
+
+  connBadge() {
+    const h = React.createElement; const map = { connected: ['live', 'CONNECTED', false], discovering: ['degraded', 'DISCOVERING', true], disconnected: ['offline', 'DISCONNECTED', false] };
+    const m = map[this.state.conn]; return h('span', { className: 'pill', style: { color: 'var(--status-' + m[0] + ')' } }, h('span', { className: 'tick' + (m[2] ? ' live' : '') }), m[1]);
+  }
+
+  simControl() {
+    const h = React.createElement;
+    return h('div', { title: 'Prototype: simulate device state', style: { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 8px', border: '1px dashed var(--border)', borderRadius: 8 } },
+      h('span', { style: { fontSize: 9, letterSpacing: '0.24em', color: 'var(--fg-dimmer)', fontFamily: 'var(--font-chrome)' } }, 'SIM'),
+      this.seg([{ v: 'connected', label: 'Live' }, { v: 'discovering', label: 'Scan' }, { v: 'disconnected', label: 'Off' }], this.state.conn, v => this.setConn(v)));
+  }
+
+  srow(label, val, color) {
+    const h = React.createElement;
+    return h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: 12, padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' } },
+      h('span', { style: { fontSize: 12, color: 'var(--fg-dimmer)', fontFamily: 'var(--font-chrome)' } }, label),
+      h('span', { className: 'metric', style: { fontSize: 12.5, color: color || 'var(--accent-soft)' } }, val));
+  }
+
+  statusPanel() {
+    const S = this.state;
+    return this.panelWrap(React.createElement('div', {}, this.sectionLabel('STATUS'),
+      this.srow('product', 'Tiny3 (enum 18)'),
+      this.srow('SN', '<redacted-SN>'),
+      this.srow('firmware', '6.6.9.1'),
+      this.srow('mode', 'UVC'),
+      this.srow('run state', S.run === 'sleep' ? 'Sleep' : 'Active', S.run === 'sleep' ? 'var(--status-degraded)' : 'var(--status-live)'),
+      this.srow('zoom', this.zoomLabel() + '  (1.0–2.0)'),
+      this.srow('AI / track', S.ai === 'off' ? 'Off' : S.ai === 'track' ? 'Track' : 'Face', S.ai === 'off' ? 'var(--fg-dim)' : 'var(--status-busy)')
+    ), 16);
+  }
+
+  controlsPanel() {
+    const h = React.createElement;
+    return this.panelWrap(h('div', {},
+      this.sectionLabel('CONTROLS'),
+      h('div', { style: { display: 'flex', justifyContent: 'center', padding: '2px 0 14px' } }, this.ptz(146)),
+      this.moveRow(),
+      h('div', { style: { height: 14 } }),
+      this.cameraRow(),
+      h('div', { style: { height: 1, background: 'var(--border)', margin: '16px 0' } }),
+      this.sectionLabel('PRESETS'),
+      this.presetRow()
+    ), 16);
+  }
+
+  logPanel(id, ht) {
+    const h = React.createElement;
+    return this.panelWrap(h('div', {}, this.sectionLabel('LOG'),
+      h('div', { id, className: 'scroll', style: { height: ht, overflow: 'auto', fontFamily: 'var(--font-chrome)', fontSize: 11.5, lineHeight: 1.7, paddingRight: 6 } },
+        this.state.log.map((l, i) => h('div', { key: i, style: { color: this.logColor(l.k), whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, h('span', { style: { color: 'var(--fg-dimmer)', marginRight: 8 } }, l.t), l.m)))
+    ), 14);
+  }
+
+  preview() {
+    const h = React.createElement; const S = this.state;
+    const base = { position: 'relative', height: '100%', width: '100%', minHeight: 120, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+    if (S.conn === 'disconnected') return h('div', { style: { ...base, background: 'var(--bg-elevated)' } },
+      h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, textAlign: 'center', padding: 20 } },
+        h('div', { style: { color: 'var(--fg-dimmer)' } }, this.icon('videoOff', 34)),
+        h('div', { style: { fontSize: 14, color: 'var(--fg)' } }, 'No device found'),
+        h('div', { className: 'chrome-sm', style: { color: 'var(--fg-dimmer)', maxWidth: 250 } }, 'Connect an OBSBOT camera via USB, then rescan.'),
+        h('button', { onClick: () => this.setConn('discovering'), className: 'btn btn-primary btn-sm', style: { marginTop: 4 } }, this.icon('refresh', 15), 'Rescan')));
+    if (S.conn === 'discovering') return h('div', { style: { ...base, background: 'radial-gradient(circle at 50% 45%, rgba(224,108,117,0.10), transparent 62%), var(--bg-elevated)' } },
+      h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 } },
+        h('div', { style: { position: 'relative', width: 60, height: 60 } },
+          [0, 1, 2].map(i => h('div', { key: i, style: { position: 'absolute', inset: 0, borderRadius: '50%', border: '1px solid var(--accent-deep)', animation: 'ping 1.8s cubic-bezier(0,0,0.2,1) ' + (i * 0.55) + 's infinite' } })),
+          h('div', { style: { position: 'absolute', inset: 22, borderRadius: '50%', background: 'linear-gradient(180deg,var(--accent-soft),var(--accent))', boxShadow: '0 0 16px var(--accent-ring)' } })),
+        h('div', { style: { fontFamily: 'var(--font-chrome)', fontSize: 13, color: 'var(--fg)' } }, 'Discovering…'),
+        h('div', { className: 'chrome-sm', style: { color: 'var(--fg-dimmer)' } }, 'polling /dev/video0 · USB')));
+    const track = S.ai === 'track', face = S.ai === 'face', asleep = this.isAsleep();
+    const subjX = 'calc(50% + ' + (S.pan * 16) + '%)';
+    return h('div', { style: { ...base, background: 'radial-gradient(130% 110% at 50% -10%, #171a21, #0a0b0e 72%)' } },
+      h('div', { style: { position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.5 } },
+        h('div', { style: { position: 'absolute', left: '33.33%', top: 0, bottom: 0, width: 1, background: 'rgba(255,255,255,0.06)' } }),
+        h('div', { style: { position: 'absolute', left: '66.66%', top: 0, bottom: 0, width: 1, background: 'rgba(255,255,255,0.06)' } }),
+        h('div', { style: { position: 'absolute', top: '33.33%', left: 0, right: 0, height: 1, background: 'rgba(255,255,255,0.06)' } }),
+        h('div', { style: { position: 'absolute', top: '66.66%', left: 0, right: 0, height: 1, background: 'rgba(255,255,255,0.06)' } })),
+      h('div', { style: { position: 'absolute', left: subjX, top: 'calc(58% + ' + (S.tilt * 12) + '%)', transform: 'translate(-50%,-50%) scale(' + (0.85 + (S.zoom - 1) * 0.9) + ')', transition: 'all 0.15s var(--ease-out)' } },
+        h('div', { style: { width: 120, height: 120, borderRadius: '50%', background: 'radial-gradient(circle at 50% 35%, rgba(224,108,117,0.28), rgba(224,108,117,0.05) 60%, transparent 72%)', filter: 'blur(2px)' } })),
+      (track || face) ? h('div', { style: { position: 'absolute', left: subjX, top: 'calc(52% + ' + (S.tilt * 12) + '%)', transform: 'translate(-50%,-50%)', width: face ? 108 : 150, height: face ? 128 : 150, border: '1.5px solid var(--accent)', borderRadius: face ? 10 : 6, boxShadow: '0 0 0 1px rgba(0,0,0,0.4), 0 0 18px -4px var(--accent-ring)', transition: 'all 0.15s' } },
+        h('div', { style: { position: 'absolute', top: -9, left: -1, fontSize: 9.5, letterSpacing: '0.14em', color: '#fff', background: 'var(--accent)', padding: '1px 5px', borderRadius: 3, fontFamily: 'var(--font-chrome)' } }, face ? 'FACE' : 'TRACKING')) : null,
+      h('div', { style: { position: 'absolute', top: 12, left: 12, display: 'flex', alignItems: 'center', gap: 7 } },
+        h('span', { className: 'pill', style: { color: 'var(--status-live)', background: 'rgba(0,0,0,0.45)' } }, h('span', { className: 'tick live' }), 'LIVE'),
+        h('span', { className: 'metric', style: { fontSize: 11, color: 'rgba(255,255,255,0.7)' } }, '1080p · 30fps')),
+      h('button', { onClick: () => this.pushLog('sys', 'ffplay: external preview window opened'), className: 'btn btn-ghost btn-sm', style: { position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.35)', fontSize: 12 } }, 'ffplay ↗'),
+      h('div', { style: { position: 'absolute', left: 0, right: 0, bottom: 0, display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'linear-gradient(0deg, rgba(0,0,0,0.55), transparent)', fontFamily: 'var(--font-chrome)', fontSize: 11, color: 'rgba(255,255,255,0.75)' } },
+        h('span', { className: 'metric' }, 'PAN ' + Math.round(S.pan * 90) + '°  ·  TILT ' + Math.round(-S.tilt * 90) + '°'),
+        h('span', { className: 'metric' }, 'ZOOM ' + this.zoomLabel())),
+      asleep ? h('div', { style: { position: 'absolute', inset: 0, background: 'rgba(6,7,9,0.8)', backdropFilter: 'blur(2px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 } },
+        h('div', { style: { color: 'var(--fg-dim)' } }, this.icon('moon', 30)),
+        h('div', { style: { fontSize: 14, color: 'var(--fg)' } }, 'Camera asleep'),
+        h('button', { onClick: () => this.doWake(), className: 'btn btn-primary btn-sm' }, this.icon('sun', 15), 'Wake')) : null
+    );
+  }
+
+  // ── advanced content (shared) ─────────────────────────
+  advImage() {
+    const h = React.createElement; const S = this.state; const wbAuto = S.wb === 'auto';
+    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 15 } },
+      this.sliderRow('Brightness', 'brightness', 0, 100, 1, '%'),
+      this.sliderRow('Contrast', 'contrast', 0, 100, 1, '%'),
+      this.sliderRow('Saturation', 'saturation', 0, 100, 1, '%'),
+      this.sliderRow('Sharpness', 'sharpen', 0, 100, 1, '%'),
+      this.divider(),
+      this.rowC('White balance', this.seg([{ v: 'auto', label: 'Auto' }, { v: 'manual', label: 'Manual' }], S.wb, v => this.setState({ wb: v }))),
+      this.sliderRow('Color temperature', 'wbTemp', 2800, 7500, 50, 'K', wbAuto),
+      this.rowC('Exposure', this.selNode('exposure', ['Auto', '−1.0 EV', '−0.5 EV', '0.0 EV', '+0.5 EV', '+1.0 EV'])),
+      this.divider(),
+      this.toggleRow('HDR', 'hdr', 'Wide dynamic range for backlit scenes'));
+  }
+
+  advTracking() {
+    const h = React.createElement; const S = this.state; const off = S.ai === 'off';
+    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 15 } },
+      this.rowC('AI mode', this.seg([{ v: 'off', label: 'Off' }, { v: 'track', label: 'Track' }, { v: 'face', label: 'Face' }], S.ai, v => this.setAI(v))),
+      off ? h('div', { style: { fontSize: 12, color: 'var(--fg-dimmer)' } }, 'Enable tracking to configure framing and motion.') : null,
+      this.divider(),
+      this.rowC('Framing', this.seg([{ v: 'close', label: 'Close-up' }, { v: 'upper', label: 'Upper' }, { v: 'full', label: 'Full body' }], S.trackMode, v => this.setState({ trackMode: v }), { disabled: off })),
+      this.sliderRow('Sensitivity', 'sensitivity', 0, 100, 1, '%', off),
+      this.rowC('Motion speed', this.seg([{ v: 'slow', label: 'Slow' }, { v: 'standard', label: 'Std' }, { v: 'fast', label: 'Fast' }], S.trackSpeed, v => this.setState({ trackSpeed: v }), { disabled: off })),
+      this.rowC('Tracking zone', this.selNode('zone', ['Auto', 'Center', 'Left third', 'Right third'], off)),
+      this.divider(),
+      this.toggleRow('Gesture control', 'gesture', 'Palm to start/stop · L-sign to zoom'));
+  }
+
+  advPresets() {
+    const h = React.createElement; const S = this.state;
+    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
+      S.presets.map((p, i) => h('div', { key: i, className: 'panel', style: { padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12 } },
+        h('div', { style: { width: 30, height: 30, flexShrink: 0, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-chrome)', fontSize: 13, background: p.set ? 'var(--accent-tint)' : 'var(--bg-elevated)', color: p.set ? 'var(--accent-soft)' : 'var(--fg-dimmer)', border: '1px solid ' + (p.set ? 'var(--accent-deep)' : 'var(--border)') } }, 'P' + (i + 1)),
+        h('div', { style: { flex: 1, minWidth: 0 } },
+          p.set ? h('input', { value: p.name || '', placeholder: 'Preset ' + (i + 1), onChange: e => this.presetName(i, e.target.value), className: 'field-input', style: { padding: '3px 6px', fontSize: 13, height: 'auto', border: '1px solid transparent', background: 'transparent' } }) : h('div', { style: { fontSize: 13, color: 'var(--fg-dimmer)', padding: '0 6px' } }, 'Empty slot'),
+          p.set ? h('div', { className: 'metric', style: { fontSize: 11, color: 'var(--fg-dim)', marginTop: 2, padding: '0 6px' } }, 'pan ' + Math.round(p.pan * 90) + '° · tilt ' + Math.round(-p.tilt * 90) + '° · ' + p.zoom.toFixed(2) + 'x') : null),
+        h('div', { style: { display: 'flex', gap: 6, flexShrink: 0 } },
+          h('button', { onClick: () => this.presetGo(i), disabled: !p.set, className: 'btn btn-sm', style: { background: p.set ? 'linear-gradient(180deg,var(--accent-soft),var(--accent))' : 'transparent', color: p.set ? '#fff' : 'var(--fg-dim)', border: '1px solid ' + (p.set ? 'var(--accent-deep)' : 'var(--border)') } }, 'Go'),
+          h('button', { onClick: () => this.presetSave(i), className: 'btn btn-secondary btn-sm' }, p.set ? 'Overwrite' : 'Save'),
+          p.set ? h('button', { onClick: () => this.presetClear(i), title: 'Clear', className: 'btn btn-ghost btn-sm btn-square' }, this.icon('x', 15)) : null))),
+      h('button', { onClick: () => this.saveNew(), disabled: !S.presets.some(p => !p.set), className: 'btn btn-secondary btn-sm', style: { alignSelf: 'flex-start' } }, this.icon('plus', 15), 'Save current position'));
+  }
+
+  advBody(tab) { return tab === 'tracking' ? this.advTracking() : tab === 'presets' ? this.advPresets() : this.advImage(); }
+
+  tabBar(active, set) {
+    const h = React.createElement; const tabs = [['image', 'Image', 'sliders'], ['tracking', 'Tracking', 'crosshair'], ['presets', 'Presets', 'bookmark']];
+    return h('div', { style: { display: 'flex', gap: 4, padding: '0 14px', borderBottom: '1px solid var(--border)' } },
+      tabs.map(([v, label, ic]) => { const on = v === active; return h('button', { key: v, onClick: () => set(v), style: { display: 'flex', alignItems: 'center', gap: 6, padding: '9px 10px', background: 'none', border: 'none', borderBottom: '2px solid ' + (on ? 'var(--accent)' : 'transparent'), marginBottom: -1, color: on ? 'var(--fg)' : 'var(--fg-dim)', cursor: 'pointer', fontSize: 12.5, fontFamily: 'var(--font-chrome)', transition: 'all .15s' } }, this.icon(ic, 14), label); }));
+  }
+
+  // ── rail + pages ──────────────────────────────────────
+  rail() {
+    const h = React.createElement; const S = this.state;
+    const items = [['control', 'Control', 'grid'], ['image', 'Image', 'sliders'], ['tracking', 'Track', 'crosshair'], ['presets', 'Presets', 'bookmark'], ['log', 'Log', 'terminal']];
+    return h('div', { style: { width: 70, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '14px 0', gap: 4, background: 'rgba(255,255,255,0.015)' } },
+      h('div', { style: { marginBottom: 8 } }, this.obsGlyph(26)),
+      items.map(([v, label, ic]) => { const on = S.v2nav === v; return h('button', { key: v, onClick: () => this.setState({ v2nav: v }), style: { position: 'relative', width: 52, height: 50, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, border: 'none', borderRadius: 9, cursor: 'pointer', background: on ? 'var(--accent-tint)' : 'transparent', color: on ? 'var(--accent-soft)' : 'var(--fg-dim)', transition: 'all .15s' } }, on ? h('span', { style: { position: 'absolute', left: 2, top: 11, bottom: 11, width: 3, borderRadius: 2, background: 'var(--accent)', boxShadow: '0 0 8px var(--accent-ring)' } }) : null, this.icon(ic, 18), h('span', { style: { fontSize: 8.5, letterSpacing: '0.04em', fontFamily: 'var(--font-chrome)' } }, label)); }),
+      h('div', { style: { marginTop: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, color: this.isConnected() ? 'var(--status-live)' : 'var(--status-offline)' } }, h('span', { className: 'heartbeat' }), h('span', { style: { fontSize: 8, letterSpacing: '0.1em', fontFamily: 'var(--font-chrome)', color: 'var(--fg-dimmer)' } }, this.isConnected() ? 'LINK' : 'DOWN')));
+  }
+
+  pageTitle() { return { control: 'Live Control', image: 'Image & Exposure', tracking: 'AI Tracking', presets: 'Presets', log: 'Activity Log' }[this.state.v2nav]; }
+
+  page() {
+    const h = React.createElement; const nav = this.state.v2nav;
+    const scrollWrap = (c) => h('div', { className: 'scroll', style: { height: '100%', overflow: 'auto', padding: 18 } }, c);
+    if (nav === 'control') return h('div', { style: { display: 'flex', gap: 16, height: '100%', minHeight: 0, padding: 18 } },
+      h('div', { style: { flex: '1 1 420px', minWidth: 360, display: 'flex', flexDirection: 'column', gap: 14, minHeight: 0 } },
+        h('div', { style: { flex: '1 1 auto', minHeight: 240 } }, this.preview()),
+        this.panelWrap(h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', alignItems: 'center' } }, this.powerRow(), this.zoomRow()), 14)),
+      h('div', { className: 'scroll', style: { width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14, overflow: 'auto', minHeight: 0 } }, this.statusPanel(), this.controlsPanel()));
+    if (nav === 'log') return scrollWrap(h('div', { style: { display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' } },
+      h('div', { style: { flex: '1 1 460px', minWidth: 340 } }, this.logPanel('log-b', 440)),
+      h('div', { style: { width: 300, flexShrink: 0 } }, this.statusPanel())));
+    const map = { image: ['IMAGE & EXPOSURE', this.advImage()], tracking: ['AI TRACKING', this.advTracking()], presets: ['PRESETS', this.advPresets()] };
+    const m = map[nav];
+    if (nav === 'presets') return scrollWrap(this.panelWrap(h('div', {}, this.sectionLabel(m[0]), m[1]), 20, { maxWidth: 720 }));
+    return scrollWrap(h('div', { style: { display: 'flex', gap: 18, alignItems: 'flex-start', flexWrap: 'wrap' } },
+      this.panelWrap(h('div', {}, this.sectionLabel(m[0]), m[1]), 20, { flex: '1 1 440px', maxWidth: 560 }),
+      h('div', { style: { width: 300, flexShrink: 0 } }, this.panelWrap(h('div', {}, this.sectionLabel('PREVIEW'), h('div', { style: { height: 190, marginTop: 2 } }, this.preview())), 14))));
+  }
+
+  // ── body ──────────────────────────────────────────────
+  bodyB() {
+    const h = React.createElement;
+    return h('div', { style: { display: 'flex', height: '100%', minHeight: 0 } },
+      this.rail(),
+      h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border)' } },
+          h('div', {}, h('div', { style: this.ov('var(--accent-soft)') }, 'OBSBOT · PTZ CONTROL'), h('div', { style: { fontSize: 18, fontWeight: 600, marginTop: 2 } }, this.pageTitle())),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 14 } }, this.simControl(), this.connBadge())),
+        h('div', { style: { flex: 1, minHeight: 0 } }, this.page())));
+  }
+
+  renderVals() { return { bodyB: this.bodyB() }; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OBSBOT4Linux
+GenericName=OBSBOT Camera Control
+Comment=Unofficial Linux control app for OBSBOT cameras
+Exec=obsbot4linux
+Icon=obsbot4linux
+Terminal=false
+Categories=Utility;Video;AudioVideo;
+Keywords=obsbot;webcam;ptz;camera;gimbal;
+StartupWMClass=obsbot4linux
