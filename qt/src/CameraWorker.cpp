@@ -413,13 +413,24 @@ void CameraWorker::cmdSetGesture(bool on) {
     if (rc != RM_RET_OK && rcSel != RM_RET_OK)
         rc = m_dev->aiSetGestureCtrlIndividualR(0, on);
     const bool ok = (rc == RM_RET_OK || rcSel == RM_RET_OK);
-    // Honest readback — rc=0 alone proved meaningless for gesture on this
-    // device, so log what the camera says it actually did.
-    bool devGesture = false, devTarget = false;
-    if (m_dev->aiGetGestureParaR(Device::DevGestureParaTypeGesture, devGesture) == RM_RET_OK
-        && m_dev->aiGetGestureParaR(Device::DevGestureParaTypeTargetSelection, devTarget) == RM_RET_OK)
-        emit logLine("sys", QStringLiteral("gesture readback: function=%1, target-select=%2")
-                                .arg(devGesture ? "on" : "off", devTarget ? "on" : "off"));
+    // Honest readback of the WHOLE gesture parameter table — rc=0 alone proved
+    // meaningless for gesture on this device, and the flaky history (works in
+    // some sessions, not others, same code) means we need to SEE the full
+    // device-side state every time, not just the two switches we set.
+    static const char *kParaNames[] = {"function", "target-select", "zoom",
+                                       "dynamic-zoom", "record", "snapshot",
+                                       "rolling", "mirror"};
+    QStringList parts;
+    for (int t = Device::DevGestureParaTypeGesture; t <= Device::DevGestureParaTypeMirror; ++t) {
+        bool v = false;
+        if (m_dev->aiGetGestureParaR(static_cast<Device::DevGestureParaType>(t), v) == RM_RET_OK)
+            parts << QStringLiteral("%1=%2").arg(kParaNames[t], v ? "on" : "off");
+    }
+    float zf = 0.0f;
+    if (m_dev->aiGetGestureParaR(Device::DevGestureParaTypeZoomFactor, zf) == RM_RET_OK)
+        parts << QStringLiteral("zoom-factor=%1").arg(double(zf));
+    if (!parts.isEmpty())
+        emit logLine("sys", QStringLiteral("gesture readback: %1").arg(parts.join(QStringLiteral(", "))));
     emit commandResult(a, ok, rc, on ? QStringLiteral("on") : QStringLiteral("off"));
     emit logLine(ok ? "ok" : "warn", QStringLiteral("gesture %1  rc=%2").arg(on ? "on" : "off").arg(rc));
 }

@@ -505,8 +505,23 @@ void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, 
     // Wake edge (Asleep → Awake): re-apply the startup preset. The camera
     // re-centers its gimbal on wake, so this restores the user's chosen position
     // after they wake it — mirroring the on-connect behavior.
-    if (prevRun == Asleep && runState == Awake)
+    if (prevRun == Asleep && runState == Awake) {
         scheduleStartupPreset(QStringLiteral("wake"));
+        // Re-apply gesture control on wake too. Hardware finding (the "flaky
+        // gesture" history): the device stops honoring gesture across
+        // sleep/wake in some sessions — and in one logged session the camera
+        // was still ASLEEP when the connect-time re-apply fired, so the
+        // setting was accepted (rc=0, readback on) but never took effect.
+        // Same settle delay as the preset; state re-checked at fire time.
+        if (m_gesture) {
+            QTimer::singleShot(kAiReturnDelayMs, this, [this]() {
+                if (!connected() || !m_gesture || asleep()) return;
+                m_targetGesture = true;
+                QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
+                                          Q_ARG(bool, true));
+            });
+        }
+    }
 
     m_zoom = zoom; m_zoomValid = zoomValid; emit zoomChanged();
 
