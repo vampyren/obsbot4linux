@@ -75,6 +75,7 @@ class CameraController : public QObject {
     Q_PROPERTY(int autoSleepIndex READ autoSleepIndex WRITE setAutoSleepIndex NOTIFY settingsChanged)
     Q_PROPERTY(int micSleepIndex READ micSleepIndex WRITE setMicSleepIndex NOTIFY settingsChanged)
     Q_PROPERTY(int micSleepDevice MEMBER m_micSleepDevice NOTIFY statusChanged)
+    Q_PROPERTY(int autoSleepDevice MEMBER m_autoSleepDevice NOTIFY statusChanged)
     Q_PROPERTY(int fps MEMBER m_fps NOTIFY statusChanged)   // current video stream fps
 
     // ----- app meta -----
@@ -213,7 +214,7 @@ private slots:
                               const QString &fw, const QString &mode, int enumId);
     void onDeviceLost(const QString &reason);
     void onStatusUpdate(int runState, int aiModeRaw, double zoom, bool zoomValid);
-    void onAuxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps, int sleepMicro);
+    void onAuxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps, int sleepMicro, int autoSleepSec);
     void onZoomUpdate(double zoom, bool valid);
     void onImageParams(int brightness, int contrast, int saturation, int sharpness);
     void onWorkerResult(const QString &action, bool ok, int rc, const QString &message);
@@ -228,6 +229,8 @@ private:
     // finishes first — otherwise the centering overrides the preset move. `why`
     // is just a log label ("startup" / "wake").
     void scheduleStartupPreset(const QString &why);
+    // Delayed, guarded push of the managed power/sleep settings (see impl).
+    void applyPowerSettings(const QString &why);
 
     QThread m_thread;
     CameraWorker *m_worker = nullptr;
@@ -277,6 +280,7 @@ private:
     int m_brightness = 50, m_contrast = 50, m_saturation = 50, m_sharpness = 50;
     int m_fps = 0;               // current video stream fps (from status)
     int m_micSleepDevice = -1;   // device-reported mic-during-sleep (readback; -1 unknown)
+    int m_autoSleepDevice = -1;  // device-reported auto-sleep seconds (readback; -1 unknown, 0 never)
 
     bool m_previewAvailable = false;
     // Managed ffplay preview process (NOT detached) so it is killed when the app

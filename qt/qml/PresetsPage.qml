@@ -172,16 +172,28 @@ Item {
                 Text { text: "Auto sleep"; color: Theme.fg; font.family: Theme.mono; font.pixelSize: 13 }
                 Text {
                     text: "How long the camera idles before sleeping on its own. \"Never\" disables auto-sleep. "
-                        + "\"Device\" leaves the camera's own setting untouched. Note: the SDK docs don't list the "
-                        + "Tiny 3 for this call — check the Log for the result."
+                        + "\"Device\" means this app won't change the camera's current setting (it does not restore "
+                        + "a previous one). The \"device reports\" value is read live from the camera."
                     color: Theme.dimmer; font.family: Theme.sans; font.pixelSize: 12
                     wrapMode: Text.WordWrap; Layout.fillWidth: true
                 }
-                Segmented {
-                    Layout.alignment: Qt.AlignLeft
-                    options: ["Device", "Never", "2 min", "5 min", "10 min", "20 min"]
-                    currentIndex: cam.autoSleepIndex
-                    onActivated: (i) => cam.autoSleepIndex = i
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+                    Segmented {
+                        Layout.alignment: Qt.AlignLeft
+                        options: ["Device", "Never", "2 min", "5 min", "10 min", "20 min"]
+                        currentIndex: cam.autoSleepIndex
+                        onActivated: (i) => cam.autoSleepIndex = i
+                    }
+                    Item { Layout.fillWidth: true }
+                    // Live device readback (tiny.auto_sleep_time from the status push).
+                    KeyValue {
+                        key: "device reports"
+                        value: cam.autoSleepDevice > 0 ? ("sleeps after " + Math.round(cam.autoSleepDevice / 60) + " min")
+                             : cam.autoSleepDevice === 0 ? "never auto-sleeps" : "—"
+                        unknown: cam.autoSleepDevice < 0
+                    }
                 }
             }
         }
@@ -199,8 +211,8 @@ Item {
                 Text { text: "Microphone during sleep"; color: Theme.fg; font.family: Theme.mono; font.pixelSize: 13 }
                 Text {
                     text: "The camera mutes its microphones while asleep by default — mic-only calls go silent when it "
-                        + "dozes off. \"On\" keeps the mic live during sleep. \"Device\" leaves the camera's own "
-                        + "setting untouched."
+                        + "dozes off. \"On\" keeps the mic live during sleep. \"Device\" means this app won't "
+                        + "change the camera's current setting (it does not restore a previous one)."
                     color: Theme.dimmer; font.family: Theme.sans; font.pixelSize: 12
                     wrapMode: Text.WordWrap; Layout.fillWidth: true
                 }

@@ -99,7 +99,7 @@ signals:
     // HDR on/off, whether HDR is supported in the current mode, and current fps.
     // sleepMicro: device-reported mic-during-sleep flag (0/1) from the push —
     // the readback for cmdSetMicSleep.
-    void auxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps, int sleepMicro);
+    void auxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps, int sleepMicro, int autoSleepSec);
     void zoomUpdate(double zoom, bool valid);
     void imageParams(int brightness, int contrast, int saturation, int sharpness);
     void commandResult(const QString &action, bool ok, int rc, const QString &message);
@@ -121,7 +121,7 @@ private:
     // The command itself just made traffic, so this pulse costs nothing extra
     // with respect to recognizer suppression.
     void statusPulse();
-    void onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr, int hdrSupport, int fps, int sleepMicro);
+    void onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr, int hdrSupport, int fps, int sleepMicro, int autoSleepSec);
     void onDevChanged(const QString &sn, bool plugged);
 
     static void sdkStatusTrampoline(void *param, const void *data);
