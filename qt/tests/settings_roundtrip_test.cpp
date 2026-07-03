@@ -37,6 +37,8 @@ int main(int argc, char **argv) {
     s.startupPreset = 2;
     s.aiReturnPreset = 3;
     s.previewResIndex = 3;
+    s.autoSleepIdx = 3;
+    s.micSleepIdx = 2;
     s.presets[1].set = true;
     s.presets[1].name = "Speaker";
     s.presets[1].pan = -33.5;
@@ -57,6 +59,8 @@ int main(int argc, char **argv) {
     CHECK(r.startupPreset == 2);
     CHECK(r.aiReturnPreset == 3);
     CHECK(r.previewResIndex == 3);
+    CHECK(r.autoSleepIdx == 3);
+    CHECK(r.micSleepIdx == 2);
     CHECK(r.presets[1].set == true);
     CHECK(r.presets[1].name == QString("Speaker"));
     CHECK(r.presets[1].pan == -33.5);

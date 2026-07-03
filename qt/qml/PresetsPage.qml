@@ -158,5 +158,72 @@ Item {
                 }
             }
         }
+
+        // Auto-sleep timer (issue #9). "Device" = don't manage — the camera
+        // keeps whatever it has; nothing is ever sent unless you pick a value.
+        GlassPanel {
+            Layout.fillWidth: true
+            implicitHeight: autoSleepCol.implicitHeight + 24
+            ColumnLayout {
+                id: autoSleepCol
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
+                Text { text: "Auto sleep"; color: Theme.fg; font.family: Theme.mono; font.pixelSize: 13 }
+                Text {
+                    text: "How long the camera idles before sleeping on its own. \"Never\" disables auto-sleep. "
+                        + "\"Device\" leaves the camera's own setting untouched. Note: the SDK docs don't list the "
+                        + "Tiny 3 for this call — check the Log for the result."
+                    color: Theme.dimmer; font.family: Theme.sans; font.pixelSize: 12
+                    wrapMode: Text.WordWrap; Layout.fillWidth: true
+                }
+                Segmented {
+                    Layout.alignment: Qt.AlignLeft
+                    options: ["Device", "Never", "2 min", "5 min", "10 min", "20 min"]
+                    currentIndex: cam.autoSleepIndex
+                    onActivated: (i) => cam.autoSleepIndex = i
+                }
+            }
+        }
+
+        // Microphone during sleep (issue #10) — the fix for "mic goes silent in
+        // voice apps when the camera dozes off".
+        GlassPanel {
+            Layout.fillWidth: true
+            implicitHeight: micSleepCol.implicitHeight + 24
+            ColumnLayout {
+                id: micSleepCol
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
+                Text { text: "Microphone during sleep"; color: Theme.fg; font.family: Theme.mono; font.pixelSize: 13 }
+                Text {
+                    text: "The camera mutes its microphones while asleep by default — mic-only calls go silent when it "
+                        + "dozes off. \"On\" keeps the mic live during sleep. \"Device\" leaves the camera's own "
+                        + "setting untouched."
+                    color: Theme.dimmer; font.family: Theme.sans; font.pixelSize: 12
+                    wrapMode: Text.WordWrap; Layout.fillWidth: true
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+                    Segmented {
+                        Layout.alignment: Qt.AlignLeft
+                        options: ["Device", "Muted", "On"]
+                        currentIndex: cam.micSleepIndex
+                        onActivated: (i) => cam.micSleepIndex = i
+                    }
+                    Item { Layout.fillWidth: true }
+                    // Honest device readback from the status push (the gesture
+                    // lesson: rc=0 alone proves nothing).
+                    KeyValue {
+                        key: "device reports"
+                        value: cam.micSleepDevice === 1 ? "mic on in sleep"
+                             : cam.micSleepDevice === 0 ? "mic muted in sleep" : "—"
+                        unknown: cam.micSleepDevice < 0
+                    }
+                }
+            }
+        }
     }
 }

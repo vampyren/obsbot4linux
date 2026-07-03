@@ -187,6 +187,39 @@ void CameraController::setStartupPreset(int p) {
     persist();
     emit settingsChanged();
 }
+namespace {
+// autoSleepIdx → SDK seconds (<=0 disables) and human label. Index 0 ("Device")
+// is not in the table: it means "don't manage" and is never sent.
+const struct { int secs; const char *label; } kAutoSleep[] = {
+    {0, "Device"}, {0, "Never"}, {120, "2 min"}, {300, "5 min"}, {600, "10 min"}, {1200, "20 min"},
+};
+} // namespace
+
+void CameraController::setAutoSleepIndex(int idx) {
+    if (idx < 0 || idx > 5 || idx == m_settings.autoSleepIdx) return;
+    m_settings.autoSleepIdx = idx;
+    persist();
+    emit settingsChanged();
+    if (idx > 0 && connected())
+        QMetaObject::invokeMethod(m_worker, "cmdSetAutoSleep", Qt::QueuedConnection,
+                                  Q_ARG(int, kAutoSleep[idx].secs),
+                                  Q_ARG(QString, QString::fromLatin1(kAutoSleep[idx].label)));
+    else if (idx == 0)
+        emit logLine("sys", QStringLiteral("auto sleep: not managed by this app (device keeps its own setting)"));
+}
+
+void CameraController::setMicSleepIndex(int idx) {
+    if (idx < 0 || idx > 2 || idx == m_settings.micSleepIdx) return;
+    m_settings.micSleepIdx = idx;
+    persist();
+    emit settingsChanged();
+    if (idx > 0 && connected())
+        QMetaObject::invokeMethod(m_worker, "cmdSetMicSleep", Qt::QueuedConnection,
+                                  Q_ARG(bool, idx == 2));
+    else if (idx == 0)
+        emit logLine("sys", QStringLiteral("mic during sleep: not managed by this app (device keeps its own setting)"));
+}
+
 void CameraController::resetImageDefaults() {
     setImageParam(QStringLiteral("brightness"), 50);
     setImageParam(QStringLiteral("contrast"), 50);
@@ -498,6 +531,22 @@ void CameraController::onConnectionResolved(bool found, const QString &product, 
                                           Q_ARG(bool, true), Q_ARG(bool, m_settings.gestureLowTraffic));
             });
         }
+        // Re-apply managed power/sleep settings (same settle delay: the device
+        // ACKs-but-ignores config sent too early after connect). "Device" (0)
+        // means unmanaged — never sent.
+        if (m_settings.autoSleepIdx > 0 || m_settings.micSleepIdx > 0) {
+            QTimer::singleShot(kAiReturnDelayMs, this, [this]() {
+                if (!connected()) return;
+                const int as = m_settings.autoSleepIdx;
+                if (as > 0 && as <= 5)
+                    QMetaObject::invokeMethod(m_worker, "cmdSetAutoSleep", Qt::QueuedConnection,
+                                              Q_ARG(int, kAutoSleep[as].secs),
+                                              Q_ARG(QString, QString::fromLatin1(kAutoSleep[as].label)));
+                if (m_settings.micSleepIdx > 0)
+                    QMetaObject::invokeMethod(m_worker, "cmdSetMicSleep", Qt::QueuedConnection,
+                                              Q_ARG(bool, m_settings.micSleepIdx == 2));
+            });
+        }
         // Startup preset: move to the chosen preset on a GENUINE connect only —
         // after a delay so the gimbal's power-on centering finishes first (see
         // scheduleStartupPreset). A Rescan while already connected re-binds the
@@ -584,13 +633,14 @@ void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, 
     emit aiChanged();
 }
 
-void CameraController::onAuxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps) {
+void CameraController::onAuxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps, int sleepMicro) {
     // Face autofocus + HDR are reported by the device; sync them honestly (unless
     // an AI toggle is mid-flight, in which case the optimistic target stands).
     if (!m_aiPending) m_faceFocus = faceFocus;
     if (!m_hdrPending) m_hdrOn = hdrOn;   // don't clobber an in-flight HDR toggle (#8)
     m_hdrSupport = hdrSupport;
     if (fps != m_fps) { m_fps = fps; emit statusChanged(); }
+    if (sleepMicro != m_micSleepDevice) { m_micSleepDevice = sleepMicro; emit statusChanged(); }
     emit aiChanged();
     emit imageChanged();
 }

@@ -78,6 +78,11 @@ QJsonObject Settings::toJson(const AppSettings &s) {
     trk["sensitivity"] = s.sensitivity;
     trk["gesture"] = s.gesture;
     trk["gestureLowTraffic"] = s.gestureLowTraffic;
+
+    QJsonObject pwr;
+    pwr["autoSleepIdx"] = s.autoSleepIdx;
+    pwr["micSleepIdx"] = s.micSleepIdx;
+    o["power"] = pwr;
     o["tracking"] = trk;
     return o;
 }
@@ -115,6 +120,10 @@ AppSettings Settings::fromJson(const QJsonObject &o) {
     s.sensitivity = trk.value("sensitivity").toInt(s.sensitivity);
     s.gesture = trk.value("gesture").toBool(s.gesture);
     s.gestureLowTraffic = trk.value("gestureLowTraffic").toBool(s.gestureLowTraffic);
+
+    const QJsonObject pwr = o.value("power").toObject();
+    s.autoSleepIdx = std::clamp(pwr.value("autoSleepIdx").toInt(s.autoSleepIdx), 0, 5);
+    s.micSleepIdx = std::clamp(pwr.value("micSleepIdx").toInt(s.micSleepIdx), 0, 2);
     return s;
 }
 
