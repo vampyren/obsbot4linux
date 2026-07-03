@@ -11,6 +11,7 @@
 //   * deterministic shutdown of the worker thread (#1/#2/#3/#9)
 #pragma once
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QString>
 #include <QThread>
@@ -63,6 +64,11 @@ class CameraController : public QObject {
     Q_PROPERTY(int previewResIndex READ previewResIndex WRITE setPreviewResIndex NOTIFY settingsChanged)
     Q_PROPERTY(QString previewRes READ previewRes NOTIFY settingsChanged)   // human-readable, for STATUS
     Q_PROPERTY(bool sleepOnExit READ sleepOnExit WRITE setSleepOnExit NOTIFY settingsChanged)
+    // Experimental, OPT-IN: slow the status cadence while gesture control is on
+    // (frequent polling suppresses the camera's gesture recognizer). Off by
+    // default so normal behavior is unchanged; kept toggleable for A/B testing
+    // across firmware updates.
+    Q_PROPERTY(bool gestureLowTraffic READ gestureLowTraffic WRITE setGestureLowTraffic NOTIFY settingsChanged)
     Q_PROPERTY(int fps MEMBER m_fps NOTIFY statusChanged)   // current video stream fps
 
     // ----- app meta -----
@@ -84,8 +90,10 @@ class CameraController : public QObject {
     Q_PROPERTY(bool capTrackingAdvanced READ capTrackingAdvanced CONSTANT)
     Q_PROPERTY(QString capUnverifiedReason READ capUnverifiedReason CONSTANT)
 
-    // ----- presets + preview -----
+    // ----- presets + external-preview fallback -----
     Q_PROPERTY(QVariantList presets READ presets NOTIFY presetsChanged)
+    // ffplay fallback (kept alongside the embedded preview): external window path
+    // for when QtMultimedia misbehaves on a given box.
     Q_PROPERTY(bool previewAvailable READ previewAvailable CONSTANT)
 
 public:
@@ -117,6 +125,7 @@ public:
     int previewResIndex() const { return m_settings.previewResIndex; }
     QString previewRes() const;   // e.g. "1080p60"
     bool sleepOnExit() const { return m_settings.sleepOnExit; }
+    bool gestureLowTraffic() const { return m_settings.gestureLowTraffic; }
     QString appVersion() const;
 
     bool capAi() const { return true; }
@@ -142,6 +151,7 @@ public slots:
     void setAiReturnPreset(int p);
     void setPreviewResIndex(int idx);
     void setSleepOnExit(bool on);
+    void setGestureLowTraffic(bool on);
     void resetImageDefaults();     // set brightness/contrast/saturation/sharpness to 50
 
     // user actions (forwarded to the worker)
@@ -155,11 +165,13 @@ public slots:
     void setAiTracking(bool on);      // Human tracking on/off (the real Tiny3 tracking)
     void setFaceFocus(bool on);       // face autofocus on/off (independent — no gimbal motion)
     void setGesture(bool on);         // gesture control on/off
+    void gestureQuietTest();          // 60 s SDK-traffic pause (gesture diagnostic)
     void setHdr(bool on);             // HDR/WDR on/off (only when capHdr)
     void setImageParam(const QString &param, int value);  // brightness/contrast/saturation/sharpness
     void rescan();
-    void launchPreview();   // (re)launch the external ffplay preview at the chosen resolution
+    void launchPreview();   // FALLBACK: (re)launch the external ffplay preview
     void stopPreview();     // terminate the ffplay preview (also called on shutdown)
+    void copyToClipboard(const QString &text);   // e.g. "Copy" on the Log page
 
     // VELOCITY (hold-to-move) PTZ — see CameraWorker for the safety-stop design.
     // pitchFrac/yawFrac in [-1,1]; scaled internally by the current speed setting.
@@ -241,6 +253,15 @@ private:
     bool m_aiPending = false;
     int m_aiInFlight = 0;        // outstanding AI-track/face-focus toggle legs in flight
     QTimer *m_pendingTimer = nullptr;
+    // Started when an AI-Track ON command is confirmed. If the device then
+    // disengages on its own shortly after (status push back to None), we log an
+    // honest hint — the Tiny 3 accepts the command but silently drops tracking
+    // when it can't find a person in view (Rex: "AI track don't work… after
+    // some fiddling with presets [re-aiming the camera at me] it worked").
+    QElapsedTimer m_aiEngageTime;
+    // FOV carried by an in-flight preset recall; applied to the selector in
+    // onWorkerResult only when the device accepted the move (never on refusal).
+    int m_pendingGoFov = -1;
 
     // Live image params (0–100), mirrored from the device on connect + on change.
     int m_brightness = 50, m_contrast = 50, m_saturation = 50, m_sharpness = 50;

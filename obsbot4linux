@@ -3,7 +3,9 @@
 #
 # POSIX sh so it works under bash/zsh/fish alike:  ./obsbot4linux
 #
-# It configures + builds the Qt app with CMake on first run, then launches it.
+# It configures on first run and (incrementally) builds the Qt app with CMake on
+# EVERY run — a no-op when nothing changed, but it means `git pull && ./obsbot4linux`
+# always runs the code you just pulled (a stale binary once shipped an old UI).
 # The binary carries a repo-local rpath to the vendored SDK; we also export
 # LD_LIBRARY_PATH as a fallback. No global SDK install, no sudo.
 set -eu
@@ -19,15 +21,17 @@ BUILD_DIR="$QT_DIR/build"
 SDK_LIB="$SCRIPT_DIR/sdk/libdev_v2.1.0_8/linux/x86_64-release"
 BIN="$BUILD_DIR/obsbot4linux"
 
-if [ ! -x "$BIN" ]; then
-    echo "Building the Qt app (first run) ..."
-    if ! command -v cmake >/dev/null 2>&1; then
-        echo "error: cmake not found. See qt/README.md for the required packages." >&2
-        exit 1
-    fi
-    cmake -S "$QT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
-    cmake --build "$BUILD_DIR" -j
+if ! command -v cmake >/dev/null 2>&1; then
+    echo "error: cmake not found. See qt/README.md for the required packages." >&2
+    exit 1
 fi
+if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
+    echo "Configuring the Qt app (first run) ..."
+    cmake -S "$QT_DIR" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+fi
+# Incremental build every launch — instant no-op when up to date, and a pulled
+# change (code or QML, which is compiled into the binary) is never silently stale.
+cmake --build "$BUILD_DIR" -j
 
 export LD_LIBRARY_PATH="$SDK_LIB:${LD_LIBRARY_PATH:-}"
 

@@ -7,6 +7,7 @@
 // outlives its own event loop so no queued event ever lands on a dead object.
 #pragma once
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QString>
 
@@ -42,7 +43,9 @@ public slots:
     // Framing (Normal/Upper/Close-up) control was removed on Tiny3.
     void cmdSetAi(int mode, int subMode, const QString &action);
     void cmdSetFace(bool on);                          // cameraSetFaceFocusR (independent)
-    void cmdSetGesture(bool on);                       // aiSetGestureCtrlIndividualR
+    // Writes BOTH gesture config stores + full readback. lowTraffic gates the
+    // experimental 15 s status cadence (opt-in setting — see setGestureFriendly).
+    void cmdSetGesture(bool on, bool lowTraffic);
     void cmdSetHdr(bool on);                           // cameraSetWdrR
     void cmdSetImage(const QString &param, int value); // brightness/contrast/saturation/sharpness (0–100)
     void cmdReadImageParams();                         // read current image params on connect
@@ -58,6 +61,22 @@ public slots:
     // pitchSpeed/yawSpeed are degrees/sec, matching gimbalSpeedCtrlR's units.
     void cmdGimbalVelocity(double pitchSpeed, double yawSpeed);
     void cmdGimbalStop();   // idempotent; safe to call anytime, incl. when not moving
+
+    // GESTURE DIAGNOSTIC (hardware finding: the Tiny 3 executes gestures
+    // autonomously when NO app session is attached, but goes gesture-deaf while
+    // this app runs). Quiet mode silences ALL periodic SDK traffic (status push
+    // subscription + the per-push zoom getter) for `seconds` while staying
+    // attached, to determine whether the traffic or the session itself
+    // suppresses the recognizer. HARDWARE-CONFIRMED (Rex, quiet-test): it's the
+    // TRAFFIC — palm gestures worked during the quiet window.
+    void cmdQuietMode(int seconds);
+
+    // The permanent fix built on that finding: while gesture control is ON,
+    // drop the status cadence from the SDK's ~2–3 s push to a one-shot
+    // enable→push→disable duty cycle every kStatusDutyMs, leaving the USB
+    // control channel quiet enough for the camera's recognizer to work.
+    // Applied automatically by cmdSetGesture on success.
+    void setGestureFriendly(bool on);
 
     // Deterministic teardown: disable the status callback, drop the device, and
     // stop the SDK discovery task. Invoked BlockingQueued from the controller
@@ -87,6 +106,13 @@ private:
     // CODE_REVIEW #4: never log a fake "(ok)" for a move the device will ignore.
     bool aiOwnsGimbal(const QString &action);
     void refreshZoom();
+    // Gesture-friendly mode: open a one-push status window NOW (closed again by
+    // onSdkStatus). Called after state-changing commands (wake/sleep/AI/preset)
+    // so their effects reach the UI immediately instead of at the next duty
+    // tick — e.g. the wake edge must not fire the startup preset 15 s late.
+    // The command itself just made traffic, so this pulse costs nothing extra
+    // with respect to recognizer suppression.
+    void statusPulse();
     void onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr, int hdrSupport, int fps);
     void onDevChanged(const QString &sn, bool plugged);
 
@@ -99,11 +125,24 @@ private:
     int m_pollTimeoutMs = 6000;
     bool m_devChangedRegistered = false;
     std::atomic<bool> m_shuttingDown{false};
+    bool m_quiet = false;   // gesture diagnostic: drop status pushes while true
+
+    // Gesture-friendly status cadence (see setGestureFriendly).
+    bool m_gestureFriendly = false;
+    bool m_awaitingDutyPush = false;   // duty window open, waiting for one push
+    QTimer *m_statusDutyTimer = nullptr;
 
     // Cached from the SDK status push; used only for the honest AI-owns-gimbal
-    // guard. Stale-but-safe: worst case a move is briefly blocked right after AI
-    // turns off, and the user retries. Never causes an unwanted move.
+    // guard. Never causes an unwanted move.
     bool m_aiTracking = false;
+    // Grace windows after a CONFIRMED AI command (see onSdkStatus): each
+    // swallows exactly ONE stale contradicting status push — the device lags a
+    // command by up to a push cycle — then closes, so a genuine device-side
+    // change (e.g. a palm gesture re-engaging tracking) is at most one push
+    // late instead of being rewritten for the whole window.
+    QElapsedTimer m_aiOffGrace;   // after AI-off: swallow one stale "on" push
+    QElapsedTimer m_aiOnGrace;    // after AI-on: swallow one stale "None" push
+    int m_lastAiOnMode = 0;       // the mode we commanded on (forwarded during on-grace)
 
     // Velocity-mode state (hold-to-move PTZ).
     bool m_velocityActive = false;         // true while a hold-drag is in progress

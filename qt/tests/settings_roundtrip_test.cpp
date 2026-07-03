@@ -4,6 +4,7 @@
 #include "../src/Settings.h"
 
 #include <QCoreApplication>
+#include <QFile>
 #include <cstdio>
 #include <cstdlib>
 
@@ -14,8 +15,12 @@ int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
 
     // Route the config to a throwaway path via the documented env override.
+    // (Rebrand fallout: this was still the old OBSBOT_TINY3_CONFIG name, so the
+    // override silently stopped applying and the test read AND WROTE the user's
+    // real ~/.config/obsbot4linux/obsbot4linux.json — env-dependent failures
+    // plus config clobbering. Keep this in sync with Settings.cpp.)
     const QByteArray tmp = "/tmp/obsbot_settings_test.json";
-    qputenv("OBSBOT_TINY3_CONFIG", tmp);
+    qputenv("OBSBOT4LINUX_CONFIG", tmp);
     std::remove(tmp.constData());
 
     // Defaults when the file is absent.
@@ -39,6 +44,10 @@ int main(int argc, char **argv) {
     s.presets[1].zoom = 1.30;
     s.presets[1].fov = 1;
     CHECK(Settings::save(s));
+    // Guard: the save MUST have landed at the override path. If this fails the
+    // env override is broken and the test would be touching the user's real
+    // config — fail loudly instead of clobbering silently.
+    CHECK(QFile::exists(QString::fromUtf8(tmp)));
 
     // Reload (simulates an app restart) and compare.
     AppSettings r = Settings::load();

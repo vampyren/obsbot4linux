@@ -27,8 +27,12 @@ QML (console UI)  ── binds to ──►  CameraController   (GUI thread)
 
 - **`CameraController`** (GUI thread): the single QML-facing object. Mirrors device
   state into `Q_PROPERTY`s, forwards user actions to the worker as *queued* calls,
-  persists settings/presets, owns the external preview process, and holds the AI
+  persists settings/presets, owns the ffplay fallback process, and holds the AI
   toggle honesty logic.
+- **`PreviewEngine`** (GUI thread): the embedded live preview. Qt Multimedia
+  capture of the camera's UVC node (selected **by device name**, never a
+  hardcoded /dev/video0) rendered into the in-window `VideoOutput`; real MJPG
+  modes only, honest stop + log line on busy/unplug/error.
 - **`CameraWorker`** (worker `QThread`): performs **every** blocking SDK call. It
   never touches QML/GUI objects — it only emits Qt signals, delivered to the
   controller via queued connections. The SDK status callback hops onto this
@@ -71,7 +75,7 @@ Qt 6.5+ and CMake, via distro packages:
 
 ### Arch / CachyOS
 ```sh
-sudo pacman -S --needed cmake qt6-base qt6-declarative qt6-wayland
+sudo pacman -S --needed cmake qt6-base qt6-declarative qt6-multimedia qt6-wayland
 # optional, for the intended chrome font (otherwise falls back to a system mono):
 sudo pacman -S --needed ttf-jetbrains-mono-nerd   # or ttf-jetbrains-mono
 ```
@@ -85,11 +89,14 @@ sudo apt install cmake g++ \
   qt6-base-dev qt6-declarative-dev \
   qml6-module-qtquick qml6-module-qtquick-controls \
   qml6-module-qtquick-layouts qml6-module-qtquick-window \
+  qt6-multimedia-dev qml6-module-qtmultimedia \
   qt6-wayland
 ```
 
-`ffplay` (from `ffmpeg`) is optional — only needed for the external preview
-button; the app runs fine without it (the button is disabled + explains why).
+`ffplay` (from `ffmpeg`) is optional — only needed for the external fallback
+preview button; the app runs fine without it (the button is disabled). The
+embedded preview needs no external tools, just `qt6-multimedia` (whose ffmpeg
+backend decodes the camera's MJPG stream).
 
 ## Tests (hardware-free)
 

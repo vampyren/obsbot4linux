@@ -154,11 +154,12 @@ RowLayout {
         }
     }
 
-    // reference preview thumbnail
+    // reference preview — fixed size, roomy enough to judge image tweaks by
+    // (300x220 was too tiny; fill-the-page swallowed the controls — don't).
     GlassPanel {
-        Layout.preferredWidth: 300
-        Layout.maximumWidth: 320
-        Layout.preferredHeight: 220
+        Layout.preferredWidth: 460
+        Layout.maximumWidth: 480
+        Layout.preferredHeight: 310
         Layout.alignment: Qt.AlignTop
         ColumnLayout {
             anchors.fill: parent

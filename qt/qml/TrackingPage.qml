@@ -88,12 +88,34 @@ RowLayout {
                 Text {
                     text: "AI Track is the tracking mode: the camera follows a person and keeps their face framed (LED turns blue; manual PTZ is blocked while it's on). "
                         + "Face autofocus just biases focus toward faces — it's independent of tracking and does NOT move the gimbal or the LED, so its effect is subtle. "
-                        + "Gesture control responds to hand gestures (often only while AI Track is on — check the Log page for the SDK result)."
+                        + "Gesture control: open palm beside your face starts/stops tracking; the L-shape gesture zooms. "
+                        + "Detection can be unreliable while a control app is attached (under investigation, issue #11)."
                     color: Theme.dimmer
                     font.family: Theme.sans
                     font.pixelSize: 13
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
+                }
+                // Experimental, OPT-IN: while gesture is on, slow the status
+                // refresh to one per ~15 s (frequent polling suppresses the
+                // camera's gesture recognizer). Off = normal behavior, so both
+                // ways can be A/B tested across firmware updates.
+                ToggleChip {
+                    Layout.fillWidth: true
+                    text: "Low-traffic mode while gestures on (experimental)"
+                    tone: Theme.degraded
+                    enabled: cam.connected
+                    checked: cam.gestureLowTraffic
+                    onToggled: (c) => cam.gestureLowTraffic = c
+                }
+                // Diagnostic: pauses ALL periodic SDK traffic for 60 s so we can
+                // tell whether our status polling or the mere app session is what
+                // suppresses the camera's gesture recognizer.
+                ActionButton {
+                    text: "Gesture test: pause app traffic 60 s"
+                    variant: "secondary"
+                    enabled: cam.connected
+                    onClicked: cam.gestureQuietTest()
                 }
                 KeyValue { key: "tracking mode"; value: cam.connected ? cam.aiModeName : "—"; unknown: !cam.connected }
             }
@@ -139,9 +161,9 @@ RowLayout {
     }
 
     GlassPanel {
-        Layout.preferredWidth: 300
-        Layout.maximumWidth: 320
-        Layout.preferredHeight: 220
+        Layout.preferredWidth: 460
+        Layout.maximumWidth: 480
+        Layout.preferredHeight: 310
         Layout.alignment: Qt.AlignTop
         ColumnLayout {
             anchors.fill: parent

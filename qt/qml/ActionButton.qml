@@ -49,7 +49,9 @@ Item {
                 return Qt.rgba(root.tone.r, root.tone.g, root.tone.b, tap.pressed ? 0.22 : 0.15)
             if (root.variant === "secondary")
                 return Qt.rgba(1, 1, 1, tap.pressed ? 0.10 : (hover.hovered ? 0.09 : 0.055))
-            return Qt.rgba(1, 1, 1, hover.hovered ? 0.06 : 0.0)   // ghost
+            // ghost: subtle but ALWAYS visible — a fully transparent resting
+            // state read as plain text, not a button (Rex).
+            return Qt.rgba(1, 1, 1, tap.pressed ? 0.08 : (hover.hovered ? 0.065 : 0.035))
         }
         border.width: 1
         border.color: {
@@ -58,7 +60,7 @@ Item {
             if (root.active) return root.tone
             if (root.variant === "primary") return "#9c3940"
             if (root.variant === "secondary") return Qt.rgba(1, 1, 1, 0.14)
-            return "transparent"
+            return Qt.rgba(1, 1, 1, hover.hovered ? 0.20 : 0.12)   // ghost: hairline, brightens on hover
         }
         Behavior on color { ColorAnimation { duration: Theme.fast } }
         Behavior on border.color { ColorAnimation { duration: Theme.fast } }

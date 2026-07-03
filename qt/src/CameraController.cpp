@@ -1,7 +1,10 @@
 #include "CameraController.h"
 #include "CameraWorker.h"
+#include "PreviewFormats.h"
 
+#include <QClipboard>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTimer>
@@ -13,24 +16,29 @@ constexpr int kAiNone = 0;    // AiWorkModeNone
 constexpr int kAiHuman = 2;   // AiWorkModeHuman (single-person tracking)
 constexpr int kAiSwitching = 6;
 
+// NOTE: contains a UTF-8 degree sign — convert with fromUtf8, never fromLatin1
+// (fromLatin1 renders it as the "78Â°" mojibake Rex saw in the log).
 const char *kFovLabels[] = {"Wide 86°", "Medium 78°", "Narrow 65°"};
+// (Preview resolutions live in PreviewFormats.h — shared with PreviewEngine.)
 
-// Preview (ffplay) capture resolutions, indexed by AppSettings::previewResIndex.
-struct PreviewRes { const char *label; int w; int h; int fps; };
-const PreviewRes kPreviewRes[] = {
-    {"1080p30", 1920, 1080, 30},
-    {"1080p60", 1920, 1080, 60},
-    {"720p60",  1280, 720,  60},
-    {"4K30",    3840, 2160, 30},
-};
-constexpr int kPreviewResCount = int(sizeof(kPreviewRes) / sizeof(kPreviewRes[0]));
+// Settle delay before the automatic "return to preset after AI off" move: the
+// gimbal keeps disengaging from AI for ~1 s after the off command is accepted,
+// and an immediate position move gets eaten or truncated.
+constexpr int kAiReturnDelayMs = 1500;
+// Window after a confirmed AI-Track ON in which a device-side drop back to None
+// is reported as "couldn't lock on" (the Tiny 3 accepts the command but silently
+// disengages when no person is in view). Longer than the gesture-mode status
+// duty period (15 s) so the hint can't miss just because the telltale push
+// arrived at the next duty tick (review finding).
+constexpr qint64 kAiDisengageHintMs = 20000;
 } // namespace
 
 CameraController::CameraController(QObject *parent) : QObject(parent) {
     m_settings = Settings::load();
     m_aiModeName = QStringLiteral("Off");
 
-    // Preview availability: ffplay present AND a /dev/video0 node exists.
+    // ffplay fallback availability: ffplay present AND a /dev/video0 node exists.
+    // (The embedded preview has its own by-name device detection in PreviewEngine.)
     m_previewAvailable = !QStandardPaths::findExecutable("ffplay").isEmpty()
                          && QFileInfo::exists("/dev/video0");
 
@@ -195,7 +203,7 @@ void CameraController::setFovIndex(int idx) {
     }
     if (connected())
         QMetaObject::invokeMethod(m_worker, "cmdSetFov", Qt::QueuedConnection,
-                                  Q_ARG(int, idx), Q_ARG(QString, QString::fromLatin1(kFovLabels[idx])));
+                                  Q_ARG(int, idx), Q_ARG(QString, QString::fromUtf8(kFovLabels[idx])));
 }
 void CameraController::setAiReturnPreset(int p) {
     if (p < 0 || p > 3 || p == m_settings.aiReturnPreset) return;
@@ -207,9 +215,10 @@ void CameraController::setPreviewResIndex(int idx) {
     if (idx < 0 || idx >= kPreviewResCount || idx == m_settings.previewResIndex) return;
     m_settings.previewResIndex = idx;
     persist();
+    // The EMBEDDED preview restarts at the new mode via main.cpp syncing
+    // PreviewEngine off this signal.
     emit settingsChanged();
-    // If a preview is currently open, reload it at the new resolution so the
-    // change takes effect immediately (ffplay can't switch mode mid-stream).
+    // The ffplay FALLBACK (if open) is reloaded here — it can't switch mid-stream.
     if (m_previewProc)
         launchPreview();
 }
@@ -218,6 +227,21 @@ void CameraController::setSleepOnExit(bool on) {
     m_settings.sleepOnExit = on;
     persist();
     emit settingsChanged();
+}
+
+void CameraController::setGestureLowTraffic(bool on) {
+    if (on == m_settings.gestureLowTraffic) return;
+    m_settings.gestureLowTraffic = on;
+    persist();
+    emit settingsChanged();
+    // Live-apply: if gesture control is currently on, switch the worker's
+    // cadence immediately (no need to re-toggle the gesture chip).
+    if (connected())
+        QMetaObject::invokeMethod(m_worker, "setGestureFriendly", Qt::QueuedConnection,
+                                  Q_ARG(bool, m_gesture && on));
+    emit logLine("sys", on
+        ? QStringLiteral("gesture low-traffic mode ENABLED (experimental) — applies while gesture control is on")
+        : QStringLiteral("gesture low-traffic mode disabled — normal status cadence"));
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +317,8 @@ void CameraController::setGesture(bool on) {
     m_gesture = on;   // optimistic; reverted in onWorkerResult on failure
     m_settings.gesture = on;
     persist();
-    QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection, Q_ARG(bool, on));
+    QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
+                              Q_ARG(bool, on), Q_ARG(bool, m_settings.gestureLowTraffic));
     emit aiChanged();
 }
 
@@ -322,6 +347,14 @@ void CameraController::setImageParam(const QString &param, int value) {
                               Q_ARG(QString, param), Q_ARG(int, value));
 }
 
+void CameraController::gestureQuietTest() {
+    // Diagnostic (hardware finding): the camera does gestures autonomously with
+    // no app attached but goes gesture-deaf while this app runs. This pauses
+    // ALL periodic SDK traffic for 60 s to find out whether the traffic or the
+    // mere session suppresses the recognizer.
+    QMetaObject::invokeMethod(m_worker, "cmdQuietMode", Qt::QueuedConnection, Q_ARG(int, 60));
+}
+
 void CameraController::rescan() {
     m_connState = Discovering;
     emit connStateChanged();
@@ -329,17 +362,16 @@ void CameraController::rescan() {
 }
 
 void CameraController::launchPreview() {
+    // FALLBACK path: real frames in a SEPARATE ffplay window. Kept alongside the
+    // embedded preview (PreviewEngine) for boxes where QtMultimedia misbehaves.
+    // Occupies the UVC node — conflicts with the embedded preview and with
+    // browser/Meet/OBS camera use, exactly like any other capture client.
     if (!m_previewAvailable) {
         emit logLine("warn", QStringLiteral("preview: ffplay or /dev/video0 not available"));
         return;
     }
     stopPreview();   // kill any existing preview first (also used to reload on res change)
 
-    // Real frames in a SEPARATE window (never embedded, never faked). Occupies
-    // /dev/video0 and will conflict with browser/Meet/OBS camera use. The chosen
-    // preview resolution is what ffplay REQUESTS from the v4l2 node — this is the
-    // one honest sense in which this app can pick a "resolution" (the device
-    // negotiates it for this capture); the SDK itself can't set the UVC mode.
     const int ri = (m_settings.previewResIndex >= 0 && m_settings.previewResIndex < kPreviewResCount)
                        ? m_settings.previewResIndex : 0;
     const PreviewRes &pr = kPreviewRes[ri];
@@ -361,8 +393,15 @@ void CameraController::launchPreview() {
         "-window_title", QStringLiteral("OBSBOT preview (%1)").arg(QString::fromLatin1(pr.label)),
         "/dev/video0"};
     m_previewProc->start(QStringLiteral("ffplay"), args);
-    emit logLine("cmd", QStringLiteral("preview: launched ffplay at %1 (external window)")
+    emit logLine("cmd", QStringLiteral("preview: launched ffplay at %1 (external window, fallback)")
                             .arg(QString::fromLatin1(pr.label)));
+}
+
+void CameraController::copyToClipboard(const QString &text) {
+    if (auto *cb = QGuiApplication::clipboard()) {
+        cb->setText(text);
+        emit logLine("sys", QStringLiteral("log copied to clipboard (%1 chars)").arg(text.size()));
+    }
 }
 
 void CameraController::stopPreview() {
@@ -371,8 +410,13 @@ void CameraController::stopPreview() {
     m_previewProc = nullptr;
     disconnect(p, nullptr, this, nullptr);   // don't let the finished-lambda re-fire during teardown
     p->terminate();
-    if (!p->waitForFinished(800))
+    if (!p->waitForFinished(800)) {
         p->kill();
+        // Wait for the kill to land too — callers may start the EMBEDDED
+        // preview immediately after this returns, and a still-dying ffplay
+        // would hold the UVC node and bounce it with "device busy".
+        p->waitForFinished(500);
+    }
     p->deleteLater();
 }
 
@@ -393,6 +437,16 @@ void CameraController::goPreset(int idx) {
     QMetaObject::invokeMethod(m_worker, "cmdPresetGo", Qt::QueuedConnection,
                               Q_ARG(int, idx), Q_ARG(double, p.tilt), Q_ARG(double, p.pan),
                               Q_ARG(double, p.zoom), Q_ARG(int, p.fov), Q_ARG(double, speedValue()));
+    // The preset re-applies its SAVED FOV on the device (cmdPresetGo →
+    // cameraSetFovU) — keep the FOV selector in sync instead of silently
+    // diverging. Rex's "Wide/Med show the same" bug: the startup/wake/AI-return
+    // preset had restored the preset's FOV behind the selector's back, so the
+    // first click on the already-active FOV looked like a no-op and only the
+    // second click (a real change) visibly worked.
+    // Synced in onWorkerResult ON SUCCESS ONLY (review finding: syncing here,
+    // before knowing whether cmdPresetGo refuses — AI owns gimbal, no device —
+    // desynced AND persisted a FOV the camera never got).
+    m_pendingGoFov = (p.fov >= 0 && p.fov <= 2) ? p.fov : -1;
 }
 void CameraController::clearPreset(int idx) {
     if (idx < 0 || idx > 2) return;
@@ -426,7 +480,24 @@ void CameraController::onConnectionResolved(bool found, const QString &product, 
         // Align the device's FOV with the restored UI setting (benign, no motion).
         QMetaObject::invokeMethod(m_worker, "cmdSetFov", Qt::QueuedConnection,
                                   Q_ARG(int, m_settings.fovIndex),
-                                  Q_ARG(QString, QString::fromLatin1(kFovLabels[m_settings.fovIndex])));
+                                  Q_ARG(QString, QString::fromUtf8(kFovLabels[m_settings.fovIndex])));
+        // Re-apply the persisted gesture-control choice to the DEVICE. Restoring
+        // it only into the UI (constructor) left the chip showing ON while the
+        // camera actually had gesture off — gestures "didn't detect" all session
+        // unless the user re-toggled (Rex's hardware finding). rc is logged.
+        // m_targetGesture must match, or the failure leg in onWorkerResult would
+        // "revert" to !false and confirm the chip ON — the very bug being fixed.
+        // Delayed like the startup preset: right at connect the device still
+        // eats commands (rc=0 but no effect) — the same too-early window that
+        // forces kAiReturnDelayMs and the 1600 ms preset settle.
+        if (m_gesture) {
+            QTimer::singleShot(kAiReturnDelayMs, this, [this]() {
+                if (!connected() || !m_gesture) return;
+                m_targetGesture = true;
+                QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
+                                          Q_ARG(bool, true), Q_ARG(bool, m_settings.gestureLowTraffic));
+            });
+        }
         // Startup preset: move to the chosen preset on a GENUINE connect only —
         // after a delay so the gimbal's power-on centering finishes first (see
         // scheduleStartupPreset). A Rescan while already connected re-binds the
@@ -453,6 +524,7 @@ void CameraController::onDeviceLost(const QString &reason) {
     m_hdrPending = false;
     m_aiPending = false;
     m_aiInFlight = 0;
+    m_aiEngageTime.invalidate();
     m_hadDevice = false;   // a real loss: the next connect is genuine → preset re-fires
     m_zoomValid = false;
     emit connStateChanged();
@@ -469,8 +541,23 @@ void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, 
     // Wake edge (Asleep → Awake): re-apply the startup preset. The camera
     // re-centers its gimbal on wake, so this restores the user's chosen position
     // after they wake it — mirroring the on-connect behavior.
-    if (prevRun == Asleep && runState == Awake)
+    if (prevRun == Asleep && runState == Awake) {
         scheduleStartupPreset(QStringLiteral("wake"));
+        // Re-apply gesture control on wake too. Hardware finding (the "flaky
+        // gesture" history): the device stops honoring gesture across
+        // sleep/wake in some sessions — and in one logged session the camera
+        // was still ASLEEP when the connect-time re-apply fired, so the
+        // setting was accepted (rc=0, readback on) but never took effect.
+        // Same settle delay as the preset; state re-checked at fire time.
+        if (m_gesture) {
+            QTimer::singleShot(kAiReturnDelayMs, this, [this]() {
+                if (!connected() || !m_gesture || asleep()) return;
+                m_targetGesture = true;
+                QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
+                                          Q_ARG(bool, true), Q_ARG(bool, m_settings.gestureLowTraffic));
+            });
+        }
+    }
 
     m_zoom = zoom; m_zoomValid = zoomValid; emit zoomChanged();
 
@@ -479,8 +566,21 @@ void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, 
     // Resync confirmed AI Track from the device UNLESS a toggle is in flight (#8)
     // or the device is mid-switch (#5). Any settled ai_mode > None means tracking
     // is engaged (AI Track owns the gimbal).
-    if (!m_aiPending && aiModeRaw != kAiSwitching)
+    if (!m_aiPending && aiModeRaw != kAiSwitching) {
+        const bool was = m_aiTracking;
         m_aiTracking = (aiModeRaw > kAiNone);
+        // Device-side disengage right after we enabled tracking: the Tiny 3
+        // accepts AI-Track ON (rc=0) but silently drops back to None when it
+        // can't lock onto a person. Without this hint the chip just flips off
+        // and the user is left guessing — say what happened instead.
+        if (was && !m_aiTracking
+            && m_aiEngageTime.isValid() && m_aiEngageTime.elapsed() < kAiDisengageHintMs) {
+            emit logLine("warn", QStringLiteral(
+                "ai track: device disengaged itself right after enabling — it needs a "
+                "person in view to lock on. Aim the camera at yourself and try again."));
+        }
+        if (!m_aiTracking) m_aiEngageTime.invalidate();
+    }
     emit aiChanged();
 }
 
@@ -512,24 +612,58 @@ void CameraController::onWorkerResult(const QString &action, bool ok, int /*rc*/
     // AI Track leg confirmation: apply target on success, discard on failure (#5/#7).
     if (action.startsWith("ai track")) {
         if (ok) m_aiTracking = m_targetTracking;
+        // Arm the device-disengage detector on a confirmed ON (see onStatusUpdate);
+        // a deliberate OFF disarms it so it can't fire a bogus hint.
+        if (ok && action.endsWith("on") && m_targetTracking) m_aiEngageTime.start();
+        else if (action.endsWith("off"))                     m_aiEngageTime.invalidate();
         if (--m_aiInFlight <= 0) { m_aiInFlight = 0; m_aiPending = false; m_pendingTimer->stop(); }
         emit aiChanged();
         // "After AI off, go to preset": when turning AI Track OFF is confirmed and
-        // the user chose a return preset, recall it. Queued after the AI-off
-        // command (same worker thread), so the gimbal is released before the move.
+        // the user chose a return preset, recall it — after a settle delay. The
+        // gimbal is still physically disengaging from AI for ~1 s after the off
+        // command is accepted; an immediate move gets eaten or truncated (Rex's
+        // hardware finding: "moves a tiny bit" / doesn't reach the preset). Same
+        // fix pattern as the startup-preset delay. Re-checked at fire time in
+        // case AI was switched back on during the wait.
         const int rp = m_settings.aiReturnPreset;
         if (ok && action.endsWith("off") && !m_targetTracking
             && rp >= 1 && rp <= 3 && m_settings.presets[rp - 1].set) {
-            emit logLine("cmd", QStringLiteral("ai off: returning to preset %1").arg(rp));
-            goPreset(rp - 1);
+            emit logLine("cmd", QStringLiteral("ai off: returning to preset %1 in %2 ms (gimbal settle)")
+                                    .arg(rp).arg(kAiReturnDelayMs));
+            QTimer::singleShot(kAiReturnDelayMs, this, [this, rp]() {
+                if (!connected()) return;
+                if (asleep()) {
+                    emit logLine("warn", QStringLiteral("ai off: return to preset %1 skipped — camera asleep").arg(rp));
+                    return;
+                }
+                if (aiTracking()) {
+                    emit logLine("warn", QStringLiteral("ai off: return to preset %1 skipped — AI is on again").arg(rp));
+                    return;
+                }
+                goPreset(rp - 1);
+            });
         }
     } else if (action == QLatin1String("face focus")) {
         if (ok) m_faceFocus = m_targetFace;
         if (--m_aiInFlight <= 0) { m_aiInFlight = 0; m_aiPending = false; m_pendingTimer->stop(); }
         emit aiChanged();
     } else if (action == QLatin1String("gesture")) {
-        if (!ok) { m_gesture = !m_targetGesture; m_settings.gesture = m_gesture; persist(); }  // revert
+        // Revert the DISPLAY on failure — but keep the persisted intent
+        // (review finding: persisting the revert let a failed AUTOMATIC
+        // re-apply — the delayed connect/wake timer racing an unplug —
+        // silently erase the user's saved gesture=on, so the next connect
+        // never re-applied it). setGesture() persists the user's choice at
+        // click time; a transient failure must not overwrite it.
+        if (!ok) m_gesture = !m_targetGesture;
         emit aiChanged();
+    } else if (action.startsWith(QLatin1String("preset")) && action.endsWith(QLatin1String("go"))) {
+        // FOV selector sync for a preset recall — on SUCCESS only (see goPreset).
+        if (ok && m_pendingGoFov >= 0 && m_pendingGoFov != m_settings.fovIndex) {
+            m_settings.fovIndex = m_pendingGoFov;
+            persist();
+            emit settingsChanged();
+        }
+        m_pendingGoFov = -1;
     } else if (action == QLatin1String("hdr")) {
         if (ok) m_hdrOn = m_targetHdr;
         else    m_hdrOn = !m_targetHdr;   // revert
