@@ -62,11 +62,19 @@ public slots:
 
     // GESTURE DIAGNOSTIC (hardware finding: the Tiny 3 executes gestures
     // autonomously when NO app session is attached, but goes gesture-deaf while
-    // this app runs — except one detection right after each connect). Quiet
-    // mode silences ALL periodic SDK traffic (status push subscription + the
-    // per-push zoom getter) for `seconds` while staying attached, to determine
-    // whether the traffic or the session itself suppresses the recognizer.
+    // this app runs). Quiet mode silences ALL periodic SDK traffic (status push
+    // subscription + the per-push zoom getter) for `seconds` while staying
+    // attached, to determine whether the traffic or the session itself
+    // suppresses the recognizer. HARDWARE-CONFIRMED (Rex, quiet-test): it's the
+    // TRAFFIC — palm gestures worked during the quiet window.
     void cmdQuietMode(int seconds);
+
+    // The permanent fix built on that finding: while gesture control is ON,
+    // drop the status cadence from the SDK's ~2–3 s push to a one-shot
+    // enable→push→disable duty cycle every kStatusDutyMs, leaving the USB
+    // control channel quiet enough for the camera's recognizer to work.
+    // Applied automatically by cmdSetGesture on success.
+    void setGestureFriendly(bool on);
 
     // Deterministic teardown: disable the status callback, drop the device, and
     // stop the SDK discovery task. Invoked BlockingQueued from the controller
@@ -96,6 +104,13 @@ private:
     // CODE_REVIEW #4: never log a fake "(ok)" for a move the device will ignore.
     bool aiOwnsGimbal(const QString &action);
     void refreshZoom();
+    // Gesture-friendly mode: open a one-push status window NOW (closed again by
+    // onSdkStatus). Called after state-changing commands (wake/sleep/AI/preset)
+    // so their effects reach the UI immediately instead of at the next duty
+    // tick — e.g. the wake edge must not fire the startup preset 15 s late.
+    // The command itself just made traffic, so this pulse costs nothing extra
+    // with respect to recognizer suppression.
+    void statusPulse();
     void onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr, int hdrSupport, int fps);
     void onDevChanged(const QString &sn, bool plugged);
 
@@ -109,6 +124,11 @@ private:
     bool m_devChangedRegistered = false;
     std::atomic<bool> m_shuttingDown{false};
     bool m_quiet = false;   // gesture diagnostic: drop status pushes while true
+
+    // Gesture-friendly status cadence (see setGestureFriendly).
+    bool m_gestureFriendly = false;
+    bool m_awaitingDutyPush = false;   // duty window open, waiting for one push
+    QTimer *m_statusDutyTimer = nullptr;
 
     // Cached from the SDK status push; used only for the honest AI-owns-gimbal
     // guard. Never causes an unwanted move.

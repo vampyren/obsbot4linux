@@ -88,7 +88,9 @@ RowLayout {
                 Text {
                     text: "AI Track is the tracking mode: the camera follows a person and keeps their face framed (LED turns blue; manual PTZ is blocked while it's on). "
                         + "Face autofocus just biases focus toward faces — it's independent of tracking and does NOT move the gimbal or the LED, so its effect is subtle. "
-                        + "Gesture control (palm to start/stop tracking) is under investigation: the camera handles gestures fine on its own, but goes gesture-deaf while a control app is attached — use the test button below and check the Log page."
+                        + "Gesture control: open palm beside your face starts/stops tracking; the L-shape gesture zooms. "
+                        + "While gestures are ON this app slows its status refresh to ~15 s (the STATUS readouts update lazily) — "
+                        + "frequent status polling suppresses the camera's gesture recognizer."
                     color: Theme.dimmer
                     font.family: Theme.sans
                     font.pixelSize: 13
