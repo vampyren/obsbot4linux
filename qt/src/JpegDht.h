@@ -54,6 +54,7 @@ static inline QByteArray withStandardDht(const unsigned char *data, int size) {
     while (i + 3 < size) {
         if (data[i] != 0xff) return {};              // lost sync — give up
         const unsigned char m = data[i + 1];
+        if (m == 0xff) { ++i; continue; }            // 0xFF fill byte before a marker (T.81 §B.1.1.2)
         if (m == 0xc4) return {};                    // has DHT — nothing to fix
         if (m == 0xda) {                             // SOS — splice here
             QByteArray out;

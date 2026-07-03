@@ -63,6 +63,11 @@ struct AppSettings {
     int  trackZone   = 0;     // 0=Auto,1=Center,2=Left,3=Right
     int  sensitivity = 50;
     bool gesture = false;
+    // Experimental: apply the low-traffic status cadence while gesture is on
+    // (the camera's recognizer is suppressed by frequent status polling; this
+    // stays OPT-IN so normal behavior is unchanged and both ways can be A/B
+    // tested across firmware updates).
+    bool gestureLowTraffic = false;
 };
 
 class Settings {

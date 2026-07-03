@@ -243,7 +243,12 @@ PreviewEngine::PreviewEngine(QObject *parent) : QObject(parent) {
     // ours (QUERYCAP card name), so no dependency on Qt's format enumeration.
     connect(&m_mediaDevices, &QMediaDevices::videoInputsChanged,
             this, &PreviewEngine::refreshDevice);
-    refreshDevice();
+    // Deferred: a direct call would emit the "video device found" logLine from
+    // inside the constructor — before main.cpp has connected the signal — so
+    // the line never reached the activity log for the common already-plugged-in
+    // startup (review finding). Queued, it runs on the first event-loop pass,
+    // after the connects.
+    QMetaObject::invokeMethod(this, &PreviewEngine::refreshDevice, Qt::QueuedConnection);
 }
 
 PreviewEngine::~PreviewEngine() {

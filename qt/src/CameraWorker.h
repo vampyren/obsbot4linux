@@ -43,7 +43,9 @@ public slots:
     // Framing (Normal/Upper/Close-up) control was removed on Tiny3.
     void cmdSetAi(int mode, int subMode, const QString &action);
     void cmdSetFace(bool on);                          // cameraSetFaceFocusR (independent)
-    void cmdSetGesture(bool on);                       // aiSetGestureCtrlIndividualR
+    // Writes BOTH gesture config stores + full readback. lowTraffic gates the
+    // experimental 15 s status cadence (opt-in setting — see setGestureFriendly).
+    void cmdSetGesture(bool on, bool lowTraffic);
     void cmdSetHdr(bool on);                           // cameraSetWdrR
     void cmdSetImage(const QString &param, int value); // brightness/contrast/saturation/sharpness (0–100)
     void cmdReadImageParams();                         // read current image params on connect
@@ -133,14 +135,14 @@ private:
     // Cached from the SDK status push; used only for the honest AI-owns-gimbal
     // guard. Never causes an unwanted move.
     bool m_aiTracking = false;
-    // Grace window after a CONFIRMED "AI off" command: the device's status push
-    // lags the command by a full push cycle (2–3 s), so a stale push still
-    // reporting an AI mode would flip m_aiTracking back on and reject the very
-    // moves users expect right after turning AI off (Rex's hardware finding:
-    // the automatic "return to preset after AI off" always landed in this
-    // window and got blocked/truncated). While the window is open, pushes
-    // claiming AI-on are treated as stale.
-    QElapsedTimer m_aiOffGrace;
+    // Grace windows after a CONFIRMED AI command (see onSdkStatus): each
+    // swallows exactly ONE stale contradicting status push — the device lags a
+    // command by up to a push cycle — then closes, so a genuine device-side
+    // change (e.g. a palm gesture re-engaging tracking) is at most one push
+    // late instead of being rewritten for the whole window.
+    QElapsedTimer m_aiOffGrace;   // after AI-off: swallow one stale "on" push
+    QElapsedTimer m_aiOnGrace;    // after AI-on: swallow one stale "None" push
+    int m_lastAiOnMode = 0;       // the mode we commanded on (forwarded during on-grace)
 
     // Velocity-mode state (hold-to-move PTZ).
     bool m_velocityActive = false;         // true while a hold-drag is in progress

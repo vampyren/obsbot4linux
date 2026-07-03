@@ -77,6 +77,7 @@ QJsonObject Settings::toJson(const AppSettings &s) {
     trk["zone"] = s.trackZone;
     trk["sensitivity"] = s.sensitivity;
     trk["gesture"] = s.gesture;
+    trk["gestureLowTraffic"] = s.gestureLowTraffic;
     o["tracking"] = trk;
     return o;
 }
@@ -113,6 +114,7 @@ AppSettings Settings::fromJson(const QJsonObject &o) {
     s.trackZone = trk.value("zone").toInt(s.trackZone);
     s.sensitivity = trk.value("sensitivity").toInt(s.sensitivity);
     s.gesture = trk.value("gesture").toBool(s.gesture);
+    s.gestureLowTraffic = trk.value("gestureLowTraffic").toBool(s.gestureLowTraffic);
     return s;
 }
 

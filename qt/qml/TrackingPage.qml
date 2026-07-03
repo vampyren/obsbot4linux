@@ -89,20 +89,31 @@ RowLayout {
                     text: "AI Track is the tracking mode: the camera follows a person and keeps their face framed (LED turns blue; manual PTZ is blocked while it's on). "
                         + "Face autofocus just biases focus toward faces — it's independent of tracking and does NOT move the gimbal or the LED, so its effect is subtle. "
                         + "Gesture control: open palm beside your face starts/stops tracking; the L-shape gesture zooms. "
-                        + "While gestures are ON this app slows its status refresh to ~15 s (the STATUS readouts update lazily) — "
-                        + "frequent status polling suppresses the camera's gesture recognizer."
+                        + "Detection can be unreliable while a control app is attached (under investigation, issue #11)."
                     color: Theme.dimmer
                     font.family: Theme.sans
                     font.pixelSize: 13
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
+                // Experimental, OPT-IN: while gesture is on, slow the status
+                // refresh to one per ~15 s (frequent polling suppresses the
+                // camera's gesture recognizer). Off = normal behavior, so both
+                // ways can be A/B tested across firmware updates.
+                ToggleChip {
+                    Layout.fillWidth: true
+                    text: "Low-traffic mode while gestures on (experimental)"
+                    tone: Theme.degraded
+                    enabled: cam.connected
+                    checked: cam.gestureLowTraffic
+                    onToggled: (c) => cam.gestureLowTraffic = c
+                }
                 // Diagnostic: pauses ALL periodic SDK traffic for 60 s so we can
                 // tell whether our status polling or the mere app session is what
                 // suppresses the camera's gesture recognizer.
                 ActionButton {
                     text: "Gesture test: pause app traffic 60 s"
-                    variant: "ghost"
+                    variant: "secondary"
                     enabled: cam.connected
                     onClicked: cam.gestureQuietTest()
                 }

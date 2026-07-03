@@ -27,8 +27,10 @@ const char *kFovLabels[] = {"Wide 86°", "Medium 78°", "Narrow 65°"};
 constexpr int kAiReturnDelayMs = 1500;
 // Window after a confirmed AI-Track ON in which a device-side drop back to None
 // is reported as "couldn't lock on" (the Tiny 3 accepts the command but silently
-// disengages when no person is in view).
-constexpr qint64 kAiDisengageHintMs = 10000;
+// disengages when no person is in view). Longer than the gesture-mode status
+// duty period (15 s) so the hint can't miss just because the telltale push
+// arrived at the next duty tick (review finding).
+constexpr qint64 kAiDisengageHintMs = 20000;
 } // namespace
 
 CameraController::CameraController(QObject *parent) : QObject(parent) {
@@ -227,6 +229,21 @@ void CameraController::setSleepOnExit(bool on) {
     emit settingsChanged();
 }
 
+void CameraController::setGestureLowTraffic(bool on) {
+    if (on == m_settings.gestureLowTraffic) return;
+    m_settings.gestureLowTraffic = on;
+    persist();
+    emit settingsChanged();
+    // Live-apply: if gesture control is currently on, switch the worker's
+    // cadence immediately (no need to re-toggle the gesture chip).
+    if (connected())
+        QMetaObject::invokeMethod(m_worker, "setGestureFriendly", Qt::QueuedConnection,
+                                  Q_ARG(bool, m_gesture && on));
+    emit logLine("sys", on
+        ? QStringLiteral("gesture low-traffic mode ENABLED (experimental) — applies while gesture control is on")
+        : QStringLiteral("gesture low-traffic mode disabled — normal status cadence"));
+}
+
 // ---------------------------------------------------------------------------
 // User actions
 // ---------------------------------------------------------------------------
@@ -300,7 +317,8 @@ void CameraController::setGesture(bool on) {
     m_gesture = on;   // optimistic; reverted in onWorkerResult on failure
     m_settings.gesture = on;
     persist();
-    QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection, Q_ARG(bool, on));
+    QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
+                              Q_ARG(bool, on), Q_ARG(bool, m_settings.gestureLowTraffic));
     emit aiChanged();
 }
 
@@ -425,11 +443,10 @@ void CameraController::goPreset(int idx) {
     // preset had restored the preset's FOV behind the selector's back, so the
     // first click on the already-active FOV looked like a no-op and only the
     // second click (a real change) visibly worked.
-    if (p.fov >= 0 && p.fov <= 2 && p.fov != m_settings.fovIndex) {
-        m_settings.fovIndex = p.fov;
-        persist();
-        emit settingsChanged();
-    }
+    // Synced in onWorkerResult ON SUCCESS ONLY (review finding: syncing here,
+    // before knowing whether cmdPresetGo refuses — AI owns gimbal, no device —
+    // desynced AND persisted a FOV the camera never got).
+    m_pendingGoFov = (p.fov >= 0 && p.fov <= 2) ? p.fov : -1;
 }
 void CameraController::clearPreset(int idx) {
     if (idx < 0 || idx > 2) return;
@@ -478,7 +495,7 @@ void CameraController::onConnectionResolved(bool found, const QString &product, 
                 if (!connected() || !m_gesture) return;
                 m_targetGesture = true;
                 QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
-                                          Q_ARG(bool, true));
+                                          Q_ARG(bool, true), Q_ARG(bool, m_settings.gestureLowTraffic));
             });
         }
         // Startup preset: move to the chosen preset on a GENUINE connect only —
@@ -537,7 +554,7 @@ void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, 
                 if (!connected() || !m_gesture || asleep()) return;
                 m_targetGesture = true;
                 QMetaObject::invokeMethod(m_worker, "cmdSetGesture", Qt::QueuedConnection,
-                                          Q_ARG(bool, true));
+                                          Q_ARG(bool, true), Q_ARG(bool, m_settings.gestureLowTraffic));
             });
         }
     }
@@ -631,8 +648,22 @@ void CameraController::onWorkerResult(const QString &action, bool ok, int /*rc*/
         if (--m_aiInFlight <= 0) { m_aiInFlight = 0; m_aiPending = false; m_pendingTimer->stop(); }
         emit aiChanged();
     } else if (action == QLatin1String("gesture")) {
-        if (!ok) { m_gesture = !m_targetGesture; m_settings.gesture = m_gesture; persist(); }  // revert
+        // Revert the DISPLAY on failure — but keep the persisted intent
+        // (review finding: persisting the revert let a failed AUTOMATIC
+        // re-apply — the delayed connect/wake timer racing an unplug —
+        // silently erase the user's saved gesture=on, so the next connect
+        // never re-applied it). setGesture() persists the user's choice at
+        // click time; a transient failure must not overwrite it.
+        if (!ok) m_gesture = !m_targetGesture;
         emit aiChanged();
+    } else if (action.startsWith(QLatin1String("preset")) && action.endsWith(QLatin1String("go"))) {
+        // FOV selector sync for a preset recall — on SUCCESS only (see goPreset).
+        if (ok && m_pendingGoFov >= 0 && m_pendingGoFov != m_settings.fovIndex) {
+            m_settings.fovIndex = m_pendingGoFov;
+            persist();
+            emit settingsChanged();
+        }
+        m_pendingGoFov = -1;
     } else if (action == QLatin1String("hdr")) {
         if (ok) m_hdrOn = m_targetHdr;
         else    m_hdrOn = !m_targetHdr;   // revert

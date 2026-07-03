@@ -206,18 +206,29 @@ void CameraWorker::onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr
     // aiMode>0 means some AI mode is engaged (includes AiWorkModeSwitching=6).
     // Treating "switching" as tracking is the safe choice for the gimbal guard.
     //
-    // Stale-push suppression: right after a confirmed "AI off" the device keeps
-    // reporting the old AI mode for up to a push cycle (2–3 s). Taking that at
-    // face value re-arms the AI-owns-gimbal guard and blocks the moves users
-    // expect immediately after turning AI off (incl. the automatic
-    // return-to-preset). Inside the grace window, an AI-on push is treated as
-    // stale: the guard stays released and the CORRECTED mode is forwarded so
-    // the UI doesn't flicker back to "on" either.
+    // Stale-push suppression, ONE push, both directions. The device's status
+    // lags a confirmed AI command by up to a push cycle (2–3 s):
+    //  * after AI-OFF, a stale push still reports the old AI mode — taking it
+    //    at face value re-arms the AI-owns-gimbal guard and blocks the moves
+    //    users expect right after turning AI off (incl. the auto return-preset);
+    //  * after AI-ON, a stale push still reports None — taking it at face value
+    //    flickered the chip off and fired a bogus "device disengaged" hint.
+    // Each grace window swallows exactly ONE contradicting push and then closes
+    // (review finding: a blanket 4 s rewrite also swallowed a GENUINE palm
+    // re-engage within the window, releasing the gimbal guard while the device
+    // was really tracking — one-shot bounds that to a single push).
     if (aiMode > Device::AiWorkModeNone
         && m_aiOffGrace.isValid() && m_aiOffGrace.elapsed() < kAiOffGraceMs) {
-        aiMode = Device::AiWorkModeNone;   // stale — we KNOW the off command landed
+        aiMode = Device::AiWorkModeNone;   // stale on-push right after our off
+        m_aiOffGrace.invalidate();
+    } else if (aiMode <= Device::AiWorkModeNone
+               && m_aiOnGrace.isValid() && m_aiOnGrace.elapsed() < kAiOffGraceMs) {
+        aiMode = m_lastAiOnMode;           // stale off-push right after our on
+        m_aiOnGrace.invalidate();
     } else if (aiMode <= Device::AiWorkModeNone) {
-        m_aiOffGrace.invalidate();         // device caught up; grace no longer needed
+        m_aiOffGrace.invalidate();         // device caught up; graces settled
+    } else {
+        m_aiOnGrace.invalidate();
     }
     m_aiTracking = (aiMode > Device::AiWorkModeNone);
 
@@ -307,6 +318,7 @@ void CameraWorker::cmdCenter() {
     const bool ok = (rc == RM_RET_OK);
     emit commandResult(a, ok, rc, ok ? QStringLiteral("centered") : QStringLiteral("failed"));
     emit logLine(ok ? "ok" : "warn", QStringLiteral("center  rc=%1").arg(rc));
+    statusPulse();   // refresh guard/UI state promptly in low-traffic mode
 }
 
 void CameraWorker::cmdNudge(int dir, double stepDeg, double speed) {
@@ -349,6 +361,7 @@ void CameraWorker::cmdNudge(int dir, double stepDeg, double speed) {
                  QStringLiteral("%1: pitch %2→%3, yaw %4→%5  rc=%6")
                      .arg(a).arg(pitch, 0, 'f', 1).arg(np, 0, 'f', 1)
                      .arg(yaw, 0, 'f', 1).arg(ny, 0, 'f', 1).arg(rc2));
+    statusPulse();
 }
 
 void CameraWorker::cmdZoom(double delta, bool absolute, double absVal, const QString &action) {
@@ -394,6 +407,7 @@ void CameraWorker::cmdSetFov(int fovType, const QString &label) {
     const bool ok = (rc == RM_RET_OK);
     emit commandResult(a, ok, rc, label);
     emit logLine(ok ? "ok" : "warn", QStringLiteral("fov %1  rc=%2").arg(label).arg(rc));
+    statusPulse();
 }
 
 void CameraWorker::cmdSetAi(int mode, int subMode, const QString &action) {
@@ -404,9 +418,15 @@ void CameraWorker::cmdSetAi(int mode, int subMode, const QString &action) {
     const bool ok = (rc == RM_RET_OK);
     if (ok) {
         m_aiTracking = (mode != Device::AiWorkModeNone);   // optimistic; status push confirms
-        // Open/close the stale-push grace window (see onSdkStatus).
-        if (mode == Device::AiWorkModeNone) m_aiOffGrace.start();
-        else                                m_aiOffGrace.invalidate();
+        // Open the matching one-shot stale-push grace window (see onSdkStatus).
+        if (mode == Device::AiWorkModeNone) {
+            m_aiOffGrace.start();
+            m_aiOnGrace.invalidate();
+        } else {
+            m_aiOnGrace.start();
+            m_lastAiOnMode = mode;
+            m_aiOffGrace.invalidate();
+        }
     }
     emit commandResult(action, ok, rc, ok ? QStringLiteral("applied") : QStringLiteral("rejected"));
     emit logLine(ok ? "ok" : "warn", QStringLiteral("%1  rc=%2").arg(action).arg(rc));
@@ -423,7 +443,7 @@ void CameraWorker::cmdSetFace(bool on) {
     emit logLine(ok ? "ok" : "warn", QStringLiteral("face focus %1  rc=%2").arg(on ? "on" : "off").arg(rc));
 }
 
-void CameraWorker::cmdSetGesture(bool on) {
+void CameraWorker::cmdSetGesture(bool on, bool lowTraffic) {
     const QString a = QStringLiteral("gesture");
     if (!requireDevice(a)) return;
     emit logLine("cmd", QStringLiteral("→ gesture %1").arg(on ? "on" : "off"));
@@ -445,7 +465,6 @@ void CameraWorker::cmdSetGesture(bool on) {
     // L-form zoom gesture needs these two flipped here as well.
     m_dev->aiSetGestureCtrlIndividualR(1, on);
     m_dev->aiSetGestureCtrlIndividualR(2, on);
-    const bool ok = (rc == RM_RET_OK || rcSel == RM_RET_OK || rcLegacy == RM_RET_OK);
     // Honest readback of the WHOLE gesture parameter table — rc=0 alone proved
     // meaningless for gesture on this device, and the flaky history (works in
     // some sessions, not others, same code) means we need to SEE the full
@@ -453,11 +472,16 @@ void CameraWorker::cmdSetGesture(bool on) {
     static const char *kParaNames[] = {"function", "target-select", "zoom",
                                        "dynamic-zoom", "record", "snapshot",
                                        "rolling", "mirror"};
+    bool paraFn = false, paraTarget = false;
+    bool paraFnOk = false, paraTargetOk = false;
     QStringList parts;
     for (int t = Device::DevGestureParaTypeGesture; t <= Device::DevGestureParaTypeMirror; ++t) {
         bool v = false;
-        if (m_dev->aiGetGestureParaR(static_cast<Device::DevGestureParaType>(t), v) == RM_RET_OK)
+        if (m_dev->aiGetGestureParaR(static_cast<Device::DevGestureParaType>(t), v) == RM_RET_OK) {
             parts << QStringLiteral("%1=%2").arg(kParaNames[t], v ? "on" : "off");
+            if (t == Device::DevGestureParaTypeGesture) { paraFn = v; paraFnOk = true; }
+            if (t == Device::DevGestureParaTypeTargetSelection) { paraTarget = v; paraTargetOk = true; }
+        }
     }
     float zf = 0.0f;
     if (m_dev->aiGetGestureParaR(Device::DevGestureParaTypeZoomFactor, zf) == RM_RET_OK)
@@ -468,7 +492,8 @@ void CameraWorker::cmdSetGesture(bool on) {
     // table above, the two-store theory is confirmed and we know which store
     // the recognizer actually honors.
     Device::AiStatus ai{};
-    if (m_dev->aiGetAiStatusR(&ai) == RM_RET_OK)
+    const bool legacyReadable = (m_dev->aiGetAiStatusR(&ai) == RM_RET_OK);
+    if (legacyReadable)
         emit logLine("sys", QStringLiteral("gesture legacy store: target=%1, zoom=%2, dynamic-zoom=%3, mirror=%4, zoom-factor=%5")
                                 .arg(ai.gesture_target ? "on" : "off",
                                      ai.gesture_zoom ? "on" : "off",
@@ -477,13 +502,26 @@ void CameraWorker::cmdSetGesture(bool on) {
                                 .arg(double(ai.gesture_zoom_factor)));
     else
         emit logLine("sys", QStringLiteral("gesture legacy store: not readable on this device"));
+    // Success = the DEVICE says the state matches the intent (review finding:
+    // OR-ing the three write rcs confirmed the chip ON even when the master
+    // switch write failed). Readback is the ground truth; the raw rcs are the
+    // fallback only when nothing is readable.
+    const bool paraMatch = paraFnOk && paraTargetOk && (paraFn == on) && (paraTarget == on);
+    const bool legacyMatch = legacyReadable && (ai.gesture_target == on);
+    const bool ok = (paraFnOk || paraTargetOk || legacyReadable)
+                        ? (paraMatch || legacyMatch)
+                        : (rc == RM_RET_OK || rcSel == RM_RET_OK || rcLegacy == RM_RET_OK);
     emit commandResult(a, ok, rc, on ? QStringLiteral("on") : QStringLiteral("off"));
-    emit logLine(ok ? "ok" : "warn", QStringLiteral("gesture %1  rc=%2 (para), rc=%3 (legacy)")
-                                         .arg(on ? "on" : "off").arg(rc).arg(rcLegacy));
-    // Permanent fix for the recognizer suppression (hardware-confirmed by the
-    // quiet-test): while gesture is on, drop to the low-traffic status cadence.
+    emit logLine(ok ? "ok" : "warn",
+                 QStringLiteral("gesture %1  rc=%2/%3 (para fn/target), rc=%4 (legacy)%5")
+                     .arg(on ? "on" : "off").arg(rc).arg(rcSel).arg(rcLegacy)
+                     .arg(ok ? QString() : QStringLiteral(" — device state does NOT match")));
+    // Recognizer-suppression mitigation (hardware-confirmed by the quiet-test):
+    // OPT-IN low-traffic status cadence while gesture is on. Gated on the user
+    // setting so default behavior stays unchanged (Rex: keep it toggleable to
+    // A/B test across firmware updates). Gesture off always restores normal.
     if (ok)
-        setGestureFriendly(on);
+        setGestureFriendly(on && lowTraffic);
 }
 
 void CameraWorker::cmdSetHdr(bool on) {
@@ -557,6 +595,7 @@ void CameraWorker::cmdPresetGo(int idx, double pitch, double yaw, double zoom, i
     emit commandResult(a, ok, rc,
                        QStringLiteral("pitch %1, yaw %2, %3x").arg(np, 0, 'f', 1).arg(ny, 0, 'f', 1).arg(tz, 0, 'f', 2));
     emit logLine(ok ? "ok" : "warn", QStringLiteral("%1  rc=%2").arg(a).arg(rc));
+    statusPulse();
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +637,7 @@ void CameraWorker::cmdGimbalStop() {
         const int rc = m_dev->gimbalSpeedCtrlR(0.0, 0.0, 0.0);
         emit logLine(rc == RM_RET_OK ? "ok" : "warn", QStringLiteral("ptz velocity: stop rc=%1").arg(rc));
     }
+    statusPulse();   // post-drag: refresh guard/UI state promptly in low-traffic mode
 }
 
 void CameraWorker::statusPulse() {
@@ -616,14 +656,14 @@ void CameraWorker::setGestureFriendly(bool on) {
         if (m_dev && !m_quiet) m_dev->enableDevStatusCallback(false);
         m_statusDutyTimer->start();
         emit logLine("sys", QStringLiteral(
-            "gesture: low-traffic mode — status refresh slowed to one per %1 s "
+            "gesture low-traffic mode ACTIVE — status refresh slowed to one per %1 s "
             "(the normal polling suppresses the camera's gesture recognizer)")
                                 .arg(kStatusDutyMs / 1000));
     } else {
         m_statusDutyTimer->stop();
         m_awaitingDutyPush = false;
         if (m_dev && !m_quiet) m_dev->enableDevStatusCallback(true);
-        emit logLine("sys", QStringLiteral("gesture off: status refresh back to normal cadence"));
+        emit logLine("sys", QStringLiteral("status refresh back to normal cadence"));
     }
 }
 

@@ -64,6 +64,11 @@ class CameraController : public QObject {
     Q_PROPERTY(int previewResIndex READ previewResIndex WRITE setPreviewResIndex NOTIFY settingsChanged)
     Q_PROPERTY(QString previewRes READ previewRes NOTIFY settingsChanged)   // human-readable, for STATUS
     Q_PROPERTY(bool sleepOnExit READ sleepOnExit WRITE setSleepOnExit NOTIFY settingsChanged)
+    // Experimental, OPT-IN: slow the status cadence while gesture control is on
+    // (frequent polling suppresses the camera's gesture recognizer). Off by
+    // default so normal behavior is unchanged; kept toggleable for A/B testing
+    // across firmware updates.
+    Q_PROPERTY(bool gestureLowTraffic READ gestureLowTraffic WRITE setGestureLowTraffic NOTIFY settingsChanged)
     Q_PROPERTY(int fps MEMBER m_fps NOTIFY statusChanged)   // current video stream fps
 
     // ----- app meta -----
@@ -120,6 +125,7 @@ public:
     int previewResIndex() const { return m_settings.previewResIndex; }
     QString previewRes() const;   // e.g. "1080p60"
     bool sleepOnExit() const { return m_settings.sleepOnExit; }
+    bool gestureLowTraffic() const { return m_settings.gestureLowTraffic; }
     QString appVersion() const;
 
     bool capAi() const { return true; }
@@ -145,6 +151,7 @@ public slots:
     void setAiReturnPreset(int p);
     void setPreviewResIndex(int idx);
     void setSleepOnExit(bool on);
+    void setGestureLowTraffic(bool on);
     void resetImageDefaults();     // set brightness/contrast/saturation/sharpness to 50
 
     // user actions (forwarded to the worker)
@@ -252,6 +259,9 @@ private:
     // when it can't find a person in view (Rex: "AI track don't work… after
     // some fiddling with presets [re-aiming the camera at me] it worked").
     QElapsedTimer m_aiEngageTime;
+    // FOV carried by an in-flight preset recall; applied to the selector in
+    // onWorkerResult only when the device accepted the move (never on refusal).
+    int m_pendingGoFov = -1;
 
     // Live image params (0–100), mirrored from the device on connect + on change.
     int m_brightness = 50, m_contrast = 50, m_saturation = 50, m_sharpness = 50;
