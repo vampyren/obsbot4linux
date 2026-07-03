@@ -69,6 +69,13 @@ class CameraController : public QObject {
     // default so normal behavior is unchanged; kept toggleable for A/B testing
     // across firmware updates.
     Q_PROPERTY(bool gestureLowTraffic READ gestureLowTraffic WRITE setGestureLowTraffic NOTIFY settingsChanged)
+    // Device power/sleep behavior. Index 0 = "Device" (don't manage). SDK docs
+    // omit the Tiny 3 for both underlying calls — micSleepDevice is the honest
+    // device-reported readback (-1 until the first status push).
+    Q_PROPERTY(int autoSleepIndex READ autoSleepIndex WRITE setAutoSleepIndex NOTIFY settingsChanged)
+    Q_PROPERTY(int micSleepIndex READ micSleepIndex WRITE setMicSleepIndex NOTIFY settingsChanged)
+    Q_PROPERTY(int micSleepDevice MEMBER m_micSleepDevice NOTIFY statusChanged)
+    Q_PROPERTY(int autoSleepDevice MEMBER m_autoSleepDevice NOTIFY statusChanged)
     Q_PROPERTY(int fps MEMBER m_fps NOTIFY statusChanged)   // current video stream fps
 
     // ----- app meta -----
@@ -126,6 +133,8 @@ public:
     QString previewRes() const;   // e.g. "1080p60"
     bool sleepOnExit() const { return m_settings.sleepOnExit; }
     bool gestureLowTraffic() const { return m_settings.gestureLowTraffic; }
+    int autoSleepIndex() const { return m_settings.autoSleepIdx; }
+    int micSleepIndex() const { return m_settings.micSleepIdx; }
     QString appVersion() const;
 
     bool capAi() const { return true; }
@@ -152,6 +161,8 @@ public slots:
     void setPreviewResIndex(int idx);
     void setSleepOnExit(bool on);
     void setGestureLowTraffic(bool on);
+    void setAutoSleepIndex(int idx);
+    void setMicSleepIndex(int idx);
     void resetImageDefaults();     // set brightness/contrast/saturation/sharpness to 50
 
     // user actions (forwarded to the worker)
@@ -203,7 +214,7 @@ private slots:
                               const QString &fw, const QString &mode, int enumId);
     void onDeviceLost(const QString &reason);
     void onStatusUpdate(int runState, int aiModeRaw, double zoom, bool zoomValid);
-    void onAuxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps);
+    void onAuxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps, int sleepMicro, int autoSleepSec);
     void onZoomUpdate(double zoom, bool valid);
     void onImageParams(int brightness, int contrast, int saturation, int sharpness);
     void onWorkerResult(const QString &action, bool ok, int rc, const QString &message);
@@ -218,6 +229,8 @@ private:
     // finishes first — otherwise the centering overrides the preset move. `why`
     // is just a log label ("startup" / "wake").
     void scheduleStartupPreset(const QString &why);
+    // Delayed, guarded push of the managed power/sleep settings (see impl).
+    void applyPowerSettings(const QString &why);
 
     QThread m_thread;
     CameraWorker *m_worker = nullptr;
@@ -266,6 +279,8 @@ private:
     // Live image params (0–100), mirrored from the device on connect + on change.
     int m_brightness = 50, m_contrast = 50, m_saturation = 50, m_sharpness = 50;
     int m_fps = 0;               // current video stream fps (from status)
+    int m_micSleepDevice = -1;   // device-reported mic-during-sleep (readback; -1 unknown)
+    int m_autoSleepDevice = -1;  // device-reported auto-sleep seconds (readback; -1 unknown, 0 never)
 
     bool m_previewAvailable = false;
     // Managed ffplay preview process (NOT detached) so it is killed when the app

@@ -68,6 +68,11 @@ struct AppSettings {
     // stays OPT-IN so normal behavior is unchanged and both ways can be A/B
     // tested across firmware updates).
     bool gestureLowTraffic = false;
+    // Device power/sleep behavior (0 = "Device": don't manage, leave the camera
+    // as-is). Applied on connect and on change; SDK category docs omit the
+    // Tiny 3 for both calls, so hardware verdict decides (issues #9/#10).
+    int autoSleepIdx = 0;   // 0=Device,1=Never,2=2min,3=5min,4=10min,5=20min
+    int micSleepIdx = 0;    // 0=Device,1=Muted in sleep,2=On in sleep
 };
 
 class Settings {

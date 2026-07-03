@@ -10,6 +10,9 @@ RowLayout {
     property string value: ""
     property bool unknown: false
     property color valueColor: Theme.accentSoft
+    // Key column width — override for keys longer than the STATUS panel's
+    // ("device reports" overflowed the default and ran into the value).
+    property int keyWidth: 92
     spacing: 8
 
     Text {
@@ -17,7 +20,8 @@ RowLayout {
         color: Theme.dim
         font.family: Theme.mono
         font.pixelSize: 12
-        Layout.preferredWidth: 92
+        Layout.preferredWidth: root.keyWidth
+        elide: Text.ElideRight
     }
     Text {
         text: root.value

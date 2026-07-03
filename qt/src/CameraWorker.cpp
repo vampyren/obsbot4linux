@@ -188,13 +188,15 @@ void CameraWorker::sdkStatusTrampoline(void *param, const void *data) {
     const int hdr = st->tiny.hdr;                // hdr 0/1
     const int hdrSup = st->tiny.hdr_support;     // hdr supported in current mode 0/1
     const int fps = st->tiny.fps;                // current video stream fps
+    const int sleepMicro = st->tiny.sleep_micro; // mic during sleep 0/1 (readback for cmdSetMicSleep)
+    const int autoSleep = st->tiny.auto_sleep_time; // seconds, 0=never (readback for cmdSetAutoSleep)
     // Do NOT touch SDK/Qt state here — just marshal onto the worker thread.
     QMetaObject::invokeMethod(
-        self, [self, run, ai, face, hdr, hdrSup, fps]() { self->onSdkStatus(run, ai, face, hdr, hdrSup, fps); },
+        self, [self, run, ai, face, hdr, hdrSup, fps, sleepMicro, autoSleep]() { self->onSdkStatus(run, ai, face, hdr, hdrSup, fps, sleepMicro, autoSleep); },
         Qt::QueuedConnection);
 }
 
-void CameraWorker::onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr, int hdrSupport, int fps) {
+void CameraWorker::onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr, int hdrSupport, int fps, int sleepMicro, int autoSleepSec) {
     if (m_shuttingDown || !m_dev) return;
     // Gesture-friendly cadence: this push is the duty cycle's one shot — close
     // the window again so the control channel goes quiet for the recognizer.
@@ -237,7 +239,7 @@ void CameraWorker::onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr
     float z = 0.0f;
     const bool zok = (m_dev->cameraGetZoomAbsoluteR(z) == RM_RET_OK);
     emit statusUpdate(runStateFromDev(runStatus), aiMode, z, zok);
-    emit auxStatus(faceFocus != 0, hdr != 0, hdrSupport != 0, fps);
+    emit auxStatus(faceFocus != 0, hdr != 0, hdrSupport != 0, fps, sleepMicro, autoSleepSec);
 }
 
 void CameraWorker::onDevChanged(const QString &sn, bool plugged) {
@@ -533,6 +535,37 @@ void CameraWorker::cmdSetHdr(bool on) {
     const bool ok = (rc == RM_RET_OK);
     emit commandResult(a, ok, rc, on ? QStringLiteral("on") : QStringLiteral("off"));
     emit logLine(ok ? "ok" : "warn", QStringLiteral("hdr %1  rc=%2").arg(on ? "on" : "off").arg(rc));
+}
+
+void CameraWorker::cmdSetAutoSleep(int seconds, const QString &label) {
+    const QString a = QStringLiteral("auto sleep");
+    if (!requireDevice(a)) return;
+    emit logLine("cmd", QStringLiteral("→ auto sleep: %1").arg(label));
+    // <=0 disables automatic sleep entirely (SDK: "negative value or 0").
+    const int rc = m_dev->cameraSetSuspendTimeU(seconds);
+    const bool ok = (rc == RM_RET_OK);
+    emit commandResult(a, ok, rc, label);
+    emit logLine(ok ? "ok" : "warn", QStringLiteral("auto sleep %1  rc=%2%3")
+                                         .arg(label).arg(rc)
+                                         .arg(ok ? QString()
+                                                 : QStringLiteral(" — device may not support this (SDK docs omit the Tiny 3)")));
+    statusPulse();   // fetch the auto_sleep_time readback promptly in low-traffic mode
+}
+
+void CameraWorker::cmdSetMicSleep(bool on) {
+    const QString a = QStringLiteral("mic in sleep");
+    if (!requireDevice(a)) return;
+    emit logLine("cmd", QStringLiteral("→ mic during sleep: %1").arg(on ? "on" : "muted"));
+    const int rc = m_dev->cameraSetMicrophoneDuringSleepU(on ? 1 : 0);
+    const bool ok = (rc == RM_RET_OK);
+    emit commandResult(a, ok, rc, on ? QStringLiteral("on") : QStringLiteral("muted"));
+    // The status push's sleep_micro field is the honest readback — watch the
+    // "device reports" line on the Presets page / next status refresh.
+    emit logLine(ok ? "ok" : "warn", QStringLiteral("mic during sleep %1  rc=%2%3")
+                                         .arg(on ? "on" : "muted").arg(rc)
+                                         .arg(ok ? QString()
+                                                 : QStringLiteral(" — device may not support this (SDK docs omit the Tiny 3)")));
+    statusPulse();   // fetch the sleep_micro readback promptly in low-traffic mode
 }
 
 void CameraWorker::cmdSetImage(const QString &param, int value) {

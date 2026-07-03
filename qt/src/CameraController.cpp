@@ -187,6 +187,62 @@ void CameraController::setStartupPreset(int p) {
     persist();
     emit settingsChanged();
 }
+namespace {
+// autoSleepIdx → SDK seconds (<=0 disables) and human label. Index 0 ("Device")
+// is not in the table: it means "don't manage" and is never sent.
+const struct { int secs; const char *label; } kAutoSleep[] = {
+    {0, "Device"}, {0, "Never"}, {120, "2 min"}, {300, "5 min"}, {600, "10 min"}, {1200, "20 min"},
+};
+} // namespace
+
+void CameraController::setAutoSleepIndex(int idx) {
+    if (idx < 0 || idx > 5 || idx == m_settings.autoSleepIdx) return;
+    m_settings.autoSleepIdx = idx;
+    persist();
+    emit settingsChanged();
+    if (idx > 0 && connected())
+        QMetaObject::invokeMethod(m_worker, "cmdSetAutoSleep", Qt::QueuedConnection,
+                                  Q_ARG(int, kAutoSleep[idx].secs),
+                                  Q_ARG(QString, QString::fromLatin1(kAutoSleep[idx].label)));
+    else if (idx == 0)
+        emit logLine("sys", QStringLiteral("auto sleep: not managed by this app (camera keeps its CURRENT setting — nothing is restored)"));
+}
+
+void CameraController::setMicSleepIndex(int idx) {
+    if (idx < 0 || idx > 2 || idx == m_settings.micSleepIdx) return;
+    m_settings.micSleepIdx = idx;
+    persist();
+    emit settingsChanged();
+    if (idx > 0 && connected())
+        QMetaObject::invokeMethod(m_worker, "cmdSetMicSleep", Qt::QueuedConnection,
+                                  Q_ARG(bool, idx == 2));
+    else if (idx == 0)
+        emit logLine("sys", QStringLiteral("mic during sleep: not managed by this app (camera keeps its CURRENT setting — nothing is restored)"));
+}
+
+// Push the MANAGED power/sleep settings ("Device"=0 is never sent) to the
+// camera after the usual settle delay — the device ACKs-but-ignores config
+// sent too early after connect or while asleep. Called from a genuine connect
+// and from every Asleep→Awake edge (review finding #1: the connect-only leg
+// silently missed the launched-while-dozing case, the most common state for a
+// camera whose owner cares about mic-during-sleep).
+void CameraController::applyPowerSettings(const QString &why) {
+    if (m_settings.autoSleepIdx <= 0 && m_settings.micSleepIdx <= 0) return;
+    QTimer::singleShot(kAiReturnDelayMs, this, [this, why]() {
+        if (!connected()) return;
+        if (asleep()) return;   // the wake edge will call us again
+        const int as = m_settings.autoSleepIdx;
+        if (as > 0 && as <= 5)
+            QMetaObject::invokeMethod(m_worker, "cmdSetAutoSleep", Qt::QueuedConnection,
+                                      Q_ARG(int, kAutoSleep[as].secs),
+                                      Q_ARG(QString, QString::fromLatin1(kAutoSleep[as].label)));
+        if (m_settings.micSleepIdx > 0)
+            QMetaObject::invokeMethod(m_worker, "cmdSetMicSleep", Qt::QueuedConnection,
+                                      Q_ARG(bool, m_settings.micSleepIdx == 2));
+        emit logLine("sys", QStringLiteral("power settings re-applied (%1)").arg(why));
+    });
+}
+
 void CameraController::resetImageDefaults() {
     setImageParam(QStringLiteral("brightness"), 50);
     setImageParam(QStringLiteral("contrast"), 50);
@@ -498,6 +554,12 @@ void CameraController::onConnectionResolved(bool found, const QString &product, 
                                           Q_ARG(bool, true), Q_ARG(bool, m_settings.gestureLowTraffic));
             });
         }
+        // Re-apply managed power/sleep settings on a GENUINE connect only —
+        // a rescan-while-connected re-bind must not re-send them (review
+        // finding #4: re-sending the suspend time restarts the camera's idle
+        // countdown, so periodic rescans would keep it awake forever).
+        if (!m_hadDevice)
+            applyPowerSettings(QStringLiteral("connect"));
         // Startup preset: move to the chosen preset on a GENUINE connect only —
         // after a delay so the gimbal's power-on centering finishes first (see
         // scheduleStartupPreset). A Rescan while already connected re-binds the
@@ -525,6 +587,8 @@ void CameraController::onDeviceLost(const QString &reason) {
     m_aiPending = false;
     m_aiInFlight = 0;
     m_aiEngageTime.invalidate();
+    m_micSleepDevice = -1;    // readback is unknown with no device (honesty)
+    m_autoSleepDevice = -1;
     m_hadDevice = false;   // a real loss: the next connect is genuine → preset re-fires
     m_zoomValid = false;
     emit connStateChanged();
@@ -557,6 +621,10 @@ void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, 
                                           Q_ARG(bool, true), Q_ARG(bool, m_settings.gestureLowTraffic));
             });
         }
+        // Managed power/sleep settings survive the same ACK-while-asleep trap —
+        // re-apply on every wake edge (mic-during-sleep especially: sent while
+        // dozing it returns rc=0 and never takes effect).
+        applyPowerSettings(QStringLiteral("wake"));
     }
 
     m_zoom = zoom; m_zoomValid = zoomValid; emit zoomChanged();
@@ -584,13 +652,16 @@ void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, 
     emit aiChanged();
 }
 
-void CameraController::onAuxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps) {
+void CameraController::onAuxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps, int sleepMicro,
+                                   int autoSleepSec) {
     // Face autofocus + HDR are reported by the device; sync them honestly (unless
     // an AI toggle is mid-flight, in which case the optimistic target stands).
     if (!m_aiPending) m_faceFocus = faceFocus;
     if (!m_hdrPending) m_hdrOn = hdrOn;   // don't clobber an in-flight HDR toggle (#8)
     m_hdrSupport = hdrSupport;
     if (fps != m_fps) { m_fps = fps; emit statusChanged(); }
+    if (sleepMicro != m_micSleepDevice) { m_micSleepDevice = sleepMicro; emit statusChanged(); }
+    if (autoSleepSec != m_autoSleepDevice) { m_autoSleepDevice = autoSleepSec; emit statusChanged(); }
     emit aiChanged();
     emit imageChanged();
 }
