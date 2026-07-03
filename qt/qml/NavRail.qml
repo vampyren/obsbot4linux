@@ -15,8 +15,8 @@ Rectangle {
 
     color: Qt.rgba(1, 1, 1, 0.02)
 
-    readonly property var labels: ["Control", "Image", "Track", "Presets", "Log"]
-    readonly property var glyphs: ["▦", "◐", "⊕", "▤", "⌗"]
+    readonly property var labels: ["Control", "Image", "Track", "Presets", "Settings", "Log"]
+    readonly property var glyphs: ["▦", "◐", "⊕", "▤", "⚙", "⌗"]
 
     Rectangle {   // right hairline
         anchors.right: parent.right
@@ -38,7 +38,7 @@ Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         spacing: 8
         Repeater {
-            model: 5
+            model: 6
             delegate: Item {
                 id: item
                 required property int index

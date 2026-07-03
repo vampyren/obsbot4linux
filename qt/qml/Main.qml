@@ -1,7 +1,7 @@
 // OBSBOT Tiny 3 Command Center — root window.
 //
 // Left icon rail + a main column (slim top bar with page title + connection
-// pill, then the page content). Five pages live in a StackLayout so their state
+// pill, then the page content). Six pages live in a StackLayout so their state
 // (log history, scroll position) survives page switches. The shared log model is
 // fed by cam.logLine and consumed by the Control and Log pages.
 //
@@ -30,7 +30,7 @@ ApplicationWindow {
     // immediately rather than relying solely on the drag-release/deadman paths.
     onActiveChanged: if (!active) cam.gimbalStop()
 
-    readonly property var pageTitles: ["Live Control", "Image & Exposure", "AI Tracking", "Presets", "Activity Log"]
+    readonly property var pageTitles: ["Live Control", "Image & Exposure", "AI Tracking", "Presets", "Settings", "Activity Log"]
 
     ListModel { id: logModel }
 
@@ -93,6 +93,7 @@ ApplicationWindow {
                 ImagePage {}
                 TrackingPage {}
                 PresetsPage {}
+                SettingsPage {}
                 LogPage { logModel: logModel }
             }
         }
