@@ -8,6 +8,8 @@
 //     0 = device found, 3 = no device by timeout, 2 = app/init error.
 // (CODE_REVIEW #11: a headless run no longer returns 0 for "no device".)
 #include <QGuiApplication>
+#include <QtGlobal>
+#include <QUrl>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QTimer>
@@ -113,7 +115,13 @@ int main(int argc, char **argv) {
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("cam", &controller);
     engine.rootContext()->setContextProperty("preview", &preview);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     engine.loadFromModule("Obsbot", "Main");
+#else
+    // Qt 6.4 (Ubuntu 24.04 LTS) has no QQmlApplicationEngine::loadFromModule.
+    // Load the same QML module type by its resource URL instead.
+    engine.load(QUrl(QStringLiteral("qrc:/Obsbot/qml/Main.qml")));
+#endif
     if (engine.rootObjects().isEmpty()) {
         std::fprintf(stderr, "Failed to load QML UI (no display, or missing Qt Quick runtime).\n");
         return 2;
