@@ -17,6 +17,26 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+// QVideoFrame(const QImage&) only exists from Qt 6.8. Build the frame explicitly so
+// this also compiles on the Qt 6.4 shipped by Ubuntu 24.04 LTS. Copies row by row
+// because the frame's stride need not match the image's bytesPerLine.
+static QVideoFrame frameFromImage(const QImage &src)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
+    return QVideoFrame(src);
+#else
+    const QImage img = src.convertToFormat(QImage::Format_RGBA8888);
+    QVideoFrame f(QVideoFrameFormat(img.size(), QVideoFrameFormat::Format_RGBA8888));
+    if (!f.map(QVideoFrame::WriteOnly))
+        return {};
+    const int rowBytes = qMin<int>(f.bytesPerLine(0), img.bytesPerLine());
+    for (int y = 0; y < img.height(); ++y)
+        memcpy(f.bits(0) + qsizetype(y) * f.bytesPerLine(0), img.constScanLine(y), size_t(rowBytes));
+    f.unmap();
+    return f;
+#endif
+}
+
 namespace {
 
 // ioctl with EINTR retry (signals can interrupt V4L2 calls).
@@ -223,7 +243,7 @@ void V4l2CaptureThread::run() {
             // race the sink's destruction (setVideoFrame itself is thread-safe).
             QMutexLocker lock(&m_sinkMutex);
             if (QVideoSink *sink = m_sink.data())
-                sink->setVideoFrame(QVideoFrame(img));
+                sink->setVideoFrame(frameFromImage(img));
         } else if (++decodeFailures >= kMaxDecodeFailures) {
             emit failed(QStringLiteral("cannot decode the MJPG stream (%1 bad frames in a row)")
                             .arg(decodeFailures));

@@ -21,8 +21,10 @@ if(NOT EXISTS "${SDK_LIB}/libdev.so")
 endif()
 
 # ---- Qt 6 ------------------------------------------------------------------
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Quick Gui Qml QuickControls2 Multimedia)
-qt_standard_project_setup(REQUIRES 6.5)
+# Minimum 6.4, not 6.5: Ubuntu 24.04 LTS (the current LTS) ships Qt 6.4.2, and the
+# only two 6.5+ APIs used are version-guarded in src/ (see main.cpp, PreviewEngine.cpp).
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Quick Gui Qml QuickControls2 Multimedia)
+qt_standard_project_setup(REQUIRES 6.4)
 
 # QML sources live in the qml/ subdirectory. Opt into the modern qmldir handling
 # when the running Qt knows this policy (6.8+); silences QTP0004 and keeps type
