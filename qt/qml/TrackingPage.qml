@@ -25,10 +25,24 @@ RowLayout {
     id: root
     spacing: Theme.s4
 
-    ColumnLayout {
+    // The left column scrolls rather than dictating the page height: its
+    // wrapped help text makes it taller than a small window, and as a direct
+    // layout child its (briefly stale, pre-wrap) height was imposed on the
+    // whole page the first time the tab was shown.
+    Flickable {
+        id: trackFlick
         Layout.fillWidth: true
         Layout.maximumWidth: 560
-        Layout.alignment: Qt.AlignTop
+        Layout.fillHeight: true
+        contentWidth: width
+        contentHeight: trackCol.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+    ColumnLayout {
+        id: trackCol
+        width: trackFlick.width - (trackFlick.contentHeight > trackFlick.height ? 12 : 0)
         spacing: Theme.s3
 
         GlassPanel {
@@ -158,6 +172,7 @@ RowLayout {
                 }
             }
         }
+    }
     }
 
     GlassPanel {
