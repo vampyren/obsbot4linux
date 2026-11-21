@@ -83,6 +83,15 @@ ApplicationWindow {
             StackLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                // A StackLayout's minimum size is the largest minimum of ALL its
+                // pages, hidden ones included. Pages that have never been shown
+                // are still laid out at a narrow default width, so their wrapped
+                // text reports an inflated height — which pushed this stack past
+                // the window's bottom edge on first launch (transport bar and
+                // preview buttons cut off until every page had been visited).
+                // The window, not the tallest hidden page, decides the height.
+                Layout.minimumHeight: 0
+                Layout.minimumWidth: 0
                 Layout.leftMargin: Theme.s5
                 Layout.rightMargin: Theme.s5
                 Layout.topMargin: Theme.s3
