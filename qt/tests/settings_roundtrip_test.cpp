@@ -27,6 +27,9 @@ int main(int argc, char **argv) {
     AppSettings def = Settings::load();
     CHECK(def.moveStepDeg == 5);
     CHECK(def.fovIndex == 0);
+    CHECK(def.previewAutoStart == true);
+    CHECK(def.wbMode == 0);
+    CHECK(def.wbTemp == 5000);
     CHECK(def.presets[0].set == false);
 
     // Mutate + persist (mirrors what the controller does on user actions).
@@ -37,6 +40,10 @@ int main(int argc, char **argv) {
     s.startupPreset = 2;
     s.aiReturnPreset = 3;
     s.previewResIndex = 3;
+    s.previewAutoStart = false;
+    s.wbMode = 1;
+    s.wbTemp = 4200;
+    s.trackFraming = 2;
     s.autoSleepIdx = 3;
     s.micSleepIdx = 2;
     s.presets[1].set = true;
@@ -59,6 +66,10 @@ int main(int argc, char **argv) {
     CHECK(r.startupPreset == 2);
     CHECK(r.aiReturnPreset == 3);
     CHECK(r.previewResIndex == 3);
+    CHECK(r.previewAutoStart == false);
+    CHECK(r.wbMode == 1);
+    CHECK(r.wbTemp == 4200);
+    CHECK(r.trackFraming == 2);
     CHECK(r.autoSleepIdx == 3);
     CHECK(r.micSleepIdx == 2);
     CHECK(r.presets[1].set == true);

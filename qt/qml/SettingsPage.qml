@@ -18,6 +18,34 @@ Item {
 
         SectionLabel { text: "Automation" }
 
+        // Auto-start live video preview on connect
+        GlassPanel {
+            Layout.fillWidth: true
+            implicitHeight: previewAutoRow.implicitHeight + 24
+            RowLayout {
+                id: previewAutoRow
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 12
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 1
+                    Text { text: "Auto-start preview on connect"; color: Theme.fg; font.family: Theme.mono; font.pixelSize: 13 }
+                    Text {
+                        text: "Automatically start the live video feed whenever the camera is connected and awake."
+                        color: Theme.dimmer; font.family: Theme.sans; font.pixelSize: 12
+                        wrapMode: Text.WordWrap; Layout.fillWidth: true
+                    }
+                }
+                ToggleChip {
+                    text: cam.previewAutoStart ? "On" : "Off"
+                    tone: Theme.live
+                    checked: cam.previewAutoStart
+                    onToggled: (c) => cam.previewAutoStart = c
+                }
+            }
+        }
+
         // Load a preset automatically on startup (explicit opt-in).
         GlassPanel {
             Layout.fillWidth: true

@@ -75,6 +75,18 @@ RowLayout {
                         onToggled: (c) => cam.setGesture(c)
                     }
                 }
+                // Framing target for human tracking
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 8
+                    SectionLabel { text: "Framing target"; Layout.preferredWidth: 110 }
+                    Segmented {
+                        Layout.fillWidth: true
+                        enabled: cam.connected && cam.capAi
+                        options: ["Full body", "Upper body", "Close-up / Head"]
+                        currentIndex: cam.trackingFraming
+                        onActivated: (i) => cam.trackingFraming = i
+                    }
+                }
                 // Face autofocus — independent of tracking, and subtle. Kept
                 // separate + honestly labeled so it isn't mistaken for a tracking
                 // control that "does nothing".
@@ -86,10 +98,9 @@ RowLayout {
                     onToggled: (c) => cam.setFaceFocus(c)
                 }
                 Text {
-                    text: "AI Track is the tracking mode: the camera follows a person and keeps their face framed (LED turns blue; manual PTZ is blocked while it's on). "
-                        + "Face autofocus just biases focus toward faces — it's independent of tracking and does NOT move the gimbal or the LED, so its effect is subtle. "
-                        + "Gesture control: open palm beside your face starts/stops tracking; the L-shape gesture zooms. "
-                        + "Detection can be unreliable while a control app is attached (under investigation, issue #11)."
+                    text: "AI Track follows a person and frames them according to the selected target (Full body, Upper body, or Close-up / Head). "
+                        + "Face autofocus biases optical lens focus toward faces — it operates independently of tracking and does NOT move the gimbal. "
+                        + "Gesture control: open palm beside your face starts/stops tracking; the L-shape gesture zooms."
                     color: Theme.dimmer
                     font.family: Theme.sans
                     font.pixelSize: 13

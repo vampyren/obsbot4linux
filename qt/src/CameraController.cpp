@@ -95,6 +95,7 @@ CameraController::CameraController(QObject *parent) : QObject(parent) {
     connect(m_worker, &CameraWorker::auxStatus, this, &CameraController::onAuxStatus);
     connect(m_worker, &CameraWorker::zoomUpdate, this, &CameraController::onZoomUpdate);
     connect(m_worker, &CameraWorker::imageParams, this, &CameraController::onImageParams);
+    connect(m_worker, &CameraWorker::whiteBalanceParams, this, &CameraController::onWhiteBalanceParams);
     connect(m_worker, &CameraWorker::commandResult, this, &CameraController::onWorkerResult);
     connect(m_worker, &CameraWorker::presetCaptured, this, &CameraController::onPresetCaptured);
 
@@ -161,7 +162,11 @@ QString CameraController::decodeAiMode(int raw) const {
     switch (raw) {
     case 0:  return QStringLiteral("Off");
     case 1:  return QStringLiteral("Group track");
-    case 2:  return QStringLiteral("Human track");
+    case 2: {
+        if (m_aiSubMode == 1) return QStringLiteral("Human (Upper body)");
+        if (m_aiSubMode == 2) return QStringLiteral("Human (Close-up)");
+        return QStringLiteral("Human (Full body)");
+    }
     case 3:  return QStringLiteral("Hand track");
     case 4:  return QStringLiteral("Whiteboard");
     case 5:  return QStringLiteral("Desk");
@@ -280,7 +285,9 @@ void CameraController::resetImageDefaults() {
     setImageParam(QStringLiteral("contrast"), 50);
     setImageParam(QStringLiteral("saturation"), 50);
     setImageParam(QStringLiteral("sharpness"), 50);
-    emit logLine("cmd", QStringLiteral("image: reset to defaults (50)"));
+    setWbMode(0);
+    setWbTemp(5000);
+    emit logLine("cmd", QStringLiteral("image: reset to defaults (50, auto WB)"));
 }
 void CameraController::setFovIndex(int idx) {
     if (idx < 0 || idx > 2) return;
@@ -332,6 +339,55 @@ void CameraController::setGestureLowTraffic(bool on) {
         : QStringLiteral("gesture low-traffic mode disabled — normal status cadence"));
 }
 
+void CameraController::setPreviewAutoStart(bool on) {
+    if (on == m_settings.previewAutoStart) return;
+    m_settings.previewAutoStart = on;
+    persist();
+    emit settingsChanged();
+}
+
+void CameraController::setTrackingFraming(int framing) {
+    framing = std::clamp(framing, 0, 2);
+    if (framing == m_settings.trackFraming) return;
+    m_settings.trackFraming = framing;
+    persist();
+    emit trackingFramingChanged();
+    if (aiTracking()) {
+        QMetaObject::invokeMethod(m_worker, "cmdSetAi", Qt::QueuedConnection,
+                                  Q_ARG(int, kAiHuman), Q_ARG(int, framing),
+                                  Q_ARG(QString, QStringLiteral("framing")));
+    }
+}
+
+void CameraController::setWbMode(int mode) {
+    mode = (mode == 0) ? 0 : 1;
+    if (mode == m_settings.wbMode) return;
+    m_settings.wbMode = mode;
+    persist();
+    emit imageChanged();
+    QMetaObject::invokeMethod(m_worker, "cmdSetWhiteBalance", Qt::QueuedConnection,
+                              Q_ARG(int, m_settings.wbMode), Q_ARG(int, m_settings.wbTemp));
+}
+
+void CameraController::setWbTemp(int tempK) {
+    tempK = std::clamp(tempK, 2800, 7500);
+    if (tempK == m_settings.wbTemp && m_settings.wbMode == 1) return;
+    m_settings.wbTemp = tempK;
+    m_settings.wbMode = 1; // setting manual temperature automatically switches to manual mode
+    persist();
+    emit imageChanged();
+    QMetaObject::invokeMethod(m_worker, "cmdSetWhiteBalance", Qt::QueuedConnection,
+                              Q_ARG(int, m_settings.wbMode), Q_ARG(int, m_settings.wbTemp));
+}
+
+void CameraController::onWhiteBalanceParams(int mode, int tempK) {
+    m_settings.wbMode = mode;
+    if (tempK >= 2800 && tempK <= 7500) {
+        m_settings.wbTemp = tempK;
+    }
+    emit imageChanged();
+}
+
 // ---------------------------------------------------------------------------
 // User actions
 // ---------------------------------------------------------------------------
@@ -371,7 +427,8 @@ void CameraController::setAiTracking(bool on) {
     m_aiPending = true;              // suppress status-push fighting until confirmed (#8)
     m_pendingTimer->start();
     QMetaObject::invokeMethod(m_worker, "cmdSetAi", Qt::QueuedConnection,
-                              Q_ARG(int, on ? kAiHuman : kAiNone), Q_ARG(int, 0),
+                              Q_ARG(int, on ? kAiHuman : kAiNone),
+                              Q_ARG(int, on ? m_settings.trackFraming : 0),
                               Q_ARG(QString, on ? QStringLiteral("ai track on")
                                                 : QStringLiteral("ai track off")));
     emit aiChanged();
@@ -632,7 +689,7 @@ void CameraController::onDeviceLost(const QString &reason) {
     emit logLine("warn", QStringLiteral("device lost: %1 — controls disabled").arg(reason));
 }
 
-void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, bool zoomValid) {
+void CameraController::onStatusUpdate(int runState, int aiModeRaw, int aiSubModeRaw, double zoom, bool zoomValid) {
     const int prevRun = m_runState;
     if (runState != m_runState) { m_runState = runState; emit statusChanged(); }
     // Wake edge (Asleep → Awake): re-apply the startup preset. The camera
@@ -663,6 +720,7 @@ void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, 
     m_zoom = zoom; m_zoomValid = zoomValid; emit zoomChanged();
 
     m_aiModeRaw = aiModeRaw;
+    m_aiSubMode = aiSubModeRaw;
     m_aiModeName = decodeAiMode(aiModeRaw);
     // Resync confirmed AI Track from the device UNLESS a toggle is in flight (#8)
     // or the device is mid-switch (#5). Any settled ai_mode > None means tracking

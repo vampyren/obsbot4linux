@@ -85,21 +85,83 @@ Rectangle {
         }
     }
 
-    // LIVE pill (top-left)
+    // Preview status pill (top-left)
     Row {
         visible: root.live
         anchors.top: parent.top; anchors.left: parent.left; anchors.margins: 12
         spacing: 6
         Rectangle {
             anchors.verticalCenter: parent.verticalCenter
-            width: 7; height: 7; radius: 3.5; color: Theme.offline
+            width: 8; height: 8; radius: 4
+            color: preview.active ? Theme.live : Theme.dimmer
             SequentialAnimation on opacity {
-                running: root.live; loops: Animation.Infinite
+                running: root.live && preview.active; loops: Animation.Infinite
                 NumberAnimation { from: 1.0; to: 0.3; duration: 700 }
                 NumberAnimation { from: 0.3; to: 1.0; duration: 700 }
             }
         }
-        Text { text: "LIVE"; color: Theme.fg; font.family: Theme.mono; font.pixelSize: 11; font.letterSpacing: 1 }
+        Text {
+            text: preview.active ? "LIVE PREVIEW" : "LIVE PREVIEW OFF"
+            color: preview.active ? Theme.fg : Theme.dim
+            font.family: Theme.mono; font.pixelSize: 11; font.letterSpacing: 1
+        }
+        Text {
+            visible: preview.active && cam.fps > 0
+            text: "· " + cam.fps + " FPS"
+            color: Theme.accentSoft
+            font.family: Theme.mono; font.pixelSize: 11
+        }
+    }
+
+    // Preview Off Center Overlay (shown when camera is connected and awake, but video stream is not active)
+    ColumnLayout {
+        anchors.centerIn: parent
+        visible: root.live && !preview.active && !cam.asleep && !cam.discovering
+        spacing: 12
+        Layout.alignment: Qt.AlignHCenter
+
+        GlassPanel {
+            Layout.alignment: Qt.AlignHCenter
+            implicitWidth: promptCol.implicitWidth + 48
+            implicitHeight: promptCol.implicitHeight + 36
+
+            ColumnLayout {
+                id: promptCol
+                anchors.centerIn: parent
+                spacing: 10
+                Layout.alignment: Qt.AlignHCenter
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "Camera Connected"
+                    color: Theme.fg
+                    font.family: Theme.sans
+                    font.pixelSize: 15
+                    font.weight: Font.DemiBold
+                }
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "Live video preview is currently off"
+                    color: Theme.dim
+                    font.family: Theme.sans
+                    font.pixelSize: 12
+                }
+
+                Item { Layout.preferredHeight: 6 }
+
+                ActionButton {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "Start Live Preview ▶"
+                    variant: "primary"
+                    enabled: (preview.available && root.live)
+                    onClicked: {
+                        cam.stopPreview();
+                        preview.start();
+                    }
+                }
+            }
+        }
     }
 
     // ZOOM readout (bottom-left)

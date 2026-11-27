@@ -45,6 +45,9 @@ struct AppSettings {
     // Put the camera to sleep when the app closes. Off by default.
     bool sleepOnExit = false;
 
+    // Automatically start live video preview when camera connects.
+    bool previewAutoStart = true;
+
     // Presets (app-local; the SDK's native presets are undocumented for Tiny 3).
     std::array<PresetData, 3> presets{};
 

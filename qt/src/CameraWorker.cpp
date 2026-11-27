@@ -184,6 +184,7 @@ void CameraWorker::sdkStatusTrampoline(void *param, const void *data) {
     const auto *st = static_cast<const Device::CameraStatus *>(data);
     const int run = st->tiny.dev_status;
     const int ai = st->tiny.ai_mode;
+    const int aiSub = st->tiny.ai_sub_mode;       // framing sub-mode (0=normal/full, 1=upper, 2=closeup)
     const int face = st->tiny.face_auto_focus;   // face autofocus 0/1
     const int hdr = st->tiny.hdr;                // hdr 0/1
     const int hdrSup = st->tiny.hdr_support;     // hdr supported in current mode 0/1
@@ -192,11 +193,13 @@ void CameraWorker::sdkStatusTrampoline(void *param, const void *data) {
     const int autoSleep = st->tiny.auto_sleep_time; // seconds, 0=never (readback for cmdSetAutoSleep)
     // Do NOT touch SDK/Qt state here — just marshal onto the worker thread.
     QMetaObject::invokeMethod(
-        self, [self, run, ai, face, hdr, hdrSup, fps, sleepMicro, autoSleep]() { self->onSdkStatus(run, ai, face, hdr, hdrSup, fps, sleepMicro, autoSleep); },
+        self, [self, run, ai, aiSub, face, hdr, hdrSup, fps, sleepMicro, autoSleep]() {
+            self->onSdkStatus(run, ai, aiSub, face, hdr, hdrSup, fps, sleepMicro, autoSleep);
+        },
         Qt::QueuedConnection);
 }
 
-void CameraWorker::onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr, int hdrSupport, int fps, int sleepMicro, int autoSleepSec) {
+void CameraWorker::onSdkStatus(int runStatus, int aiMode, int aiSubMode, int faceFocus, int hdr, int hdrSupport, int fps, int sleepMicro, int autoSleepSec) {
     if (m_shuttingDown || !m_dev) return;
     // Gesture-friendly cadence: this push is the duty cycle's one shot — close
     // the window again so the control channel goes quiet for the recognizer.
@@ -238,7 +241,7 @@ void CameraWorker::onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr
     // serialized with commands — never on the SDK callback thread.
     float z = 0.0f;
     const bool zok = (m_dev->cameraGetZoomAbsoluteR(z) == RM_RET_OK);
-    emit statusUpdate(runStateFromDev(runStatus), aiMode, z, zok);
+    emit statusUpdate(runStateFromDev(runStatus), aiMode, aiSubMode, z, zok);
     emit auxStatus(faceFocus != 0, hdr != 0, hdrSupport != 0, fps, sleepMicro, autoSleepSec);
 }
 
@@ -417,6 +420,12 @@ void CameraWorker::cmdSetAi(int mode, int subMode, const QString &action) {
     emit logLine("cmd", QStringLiteral("→ %1").arg(action));
     // For Human tracking, subMode is the AiSubModeType framing (Normal/Upper/Close-up).
     const int rc = m_dev->cameraSetAiModeU(static_cast<Device::AiWorkModeType>(mode), subMode);
+    if (mode == Device::AiWorkModeHuman) {
+        Device::DevTargetZoomType zt = Device::DevTargetZoomTypeFullBody;
+        if (subMode == 1) zt = Device::DevTargetZoomTypeHalfBody;
+        else if (subMode == 2) zt = Device::DevTargetZoomTypeCloseUp;
+        m_dev->aiSetTargetZoomTypeR(zt);
+    }
     const bool ok = (rc == RM_RET_OK);
     if (ok) {
         m_aiTracking = (mode != Device::AiWorkModeNone);   // optimistic; status push confirms
@@ -581,6 +590,22 @@ void CameraWorker::cmdSetImage(const QString &param, int value) {
     emit logLine(ok ? "ok" : "warn", QStringLiteral("%1 = %2  rc=%3").arg(param).arg(v).arg(rc));
 }
 
+void CameraWorker::cmdSetWhiteBalance(int mode, int tempK) {
+    const QString a = QStringLiteral("white balance");
+    if (!requireDevice(a)) return;
+    const auto wbType = (mode == 0) ? Device::DevWhiteBalanceAuto : Device::DevWhiteBalanceManual;
+    emit logLine("cmd", QStringLiteral("→ white balance %1 (%2K)")
+                            .arg(mode == 0 ? "auto" : "manual")
+                            .arg(tempK));
+    const int rc = m_dev->cameraSetWhiteBalanceR(wbType, tempK);
+    const bool ok = (rc == RM_RET_OK);
+    emit commandResult(a, ok, rc, ok ? QStringLiteral("applied") : QStringLiteral("rejected"));
+    emit logLine(ok ? "ok" : "warn", QStringLiteral("white balance %1  rc=%2").arg(mode == 0 ? "auto" : "manual").arg(rc));
+    if (ok) {
+        emit whiteBalanceParams(mode, tempK);
+    }
+}
+
 void CameraWorker::cmdReadImageParams() {
     if (!m_dev) return;
     int b = 50, c = 50, s = 50, sh = 50;
@@ -589,6 +614,12 @@ void CameraWorker::cmdReadImageParams() {
     m_dev->cameraGetImageSaturationR(s);
     m_dev->cameraGetImageSharpR(sh);
     emit imageParams(b, c, s, sh);
+
+    Device::DevWhiteBalanceType wb_type = Device::DevWhiteBalanceAuto;
+    int32_t wb_param = 5000;
+    if (m_dev->cameraGetWhiteBalanceR(wb_type, wb_param) == RM_RET_OK) {
+        emit whiteBalanceParams(wb_type == Device::DevWhiteBalanceAuto ? 0 : 1, wb_param);
+    }
 }
 
 void CameraWorker::cmdPresetCapture(int idx) {

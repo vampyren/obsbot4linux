@@ -54,6 +54,7 @@ public slots:
     void cmdSetAutoSleep(int seconds, const QString &label);
     void cmdSetMicSleep(bool on);
     void cmdSetImage(const QString &param, int value); // brightness/contrast/saturation/sharpness (0–100)
+    void cmdSetWhiteBalance(int mode, int tempK);      // mode: 0=Auto, 1=Manual (tempK: 2800–7500)
     void cmdReadImageParams();                         // read current image params on connect
     void cmdPresetCapture(int idx);
     void cmdPresetGo(int idx, double pitch, double yaw, double zoom, int fov, double speed);
@@ -94,7 +95,7 @@ signals:
     void connectionResolved(bool found, const QString &product, const QString &sn,
                             const QString &fw, const QString &mode, int enumId);
     void deviceLost(const QString &reason);
-    void statusUpdate(int runState, int aiModeRaw, double zoom, bool zoomValid);
+    void statusUpdate(int runState, int aiModeRaw, int aiSubModeRaw, double zoom, bool zoomValid);
     // Extra device state read from the same status push: face autofocus on/off,
     // HDR on/off, whether HDR is supported in the current mode, and current fps.
     // sleepMicro: device-reported mic-during-sleep flag (0/1) from the push —
@@ -102,6 +103,7 @@ signals:
     void auxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps, int sleepMicro, int autoSleepSec);
     void zoomUpdate(double zoom, bool valid);
     void imageParams(int brightness, int contrast, int saturation, int sharpness);
+    void whiteBalanceParams(int mode, int tempK);
     void commandResult(const QString &action, bool ok, int rc, const QString &message);
     void presetCaptured(int idx, double pitch, double yaw, double zoom, int fov);
 
@@ -121,7 +123,7 @@ private:
     // The command itself just made traffic, so this pulse costs nothing extra
     // with respect to recognizer suppression.
     void statusPulse();
-    void onSdkStatus(int runStatus, int aiMode, int faceFocus, int hdr, int hdrSupport, int fps, int sleepMicro, int autoSleepSec);
+    void onSdkStatus(int runStatus, int aiMode, int aiSubMode, int faceFocus, int hdr, int hdrSupport, int fps, int sleepMicro, int autoSleepSec);
     void onDevChanged(const QString &sn, bool plugged);
 
     static void sdkStatusTrampoline(void *param, const void *data);
