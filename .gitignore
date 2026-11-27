@@ -4,6 +4,7 @@
 # to obtain it and where to place it.
 # ---------------------------------------------------------------------------
 sdk/
+sdk-probe/libdev*/
 libdev_v2_1_0_8.zip
 # (legacy pre-move location, in case an old checkout still has it)
 libdev_v2.1.0_8/
@@ -34,3 +35,6 @@ qt/packaging/tools/
 
 # AppImage output
 dist/
+
+.clinerules
+.clineignores

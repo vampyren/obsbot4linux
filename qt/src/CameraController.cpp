@@ -3,11 +3,18 @@
 #include "PreviewFormats.h"
 
 #include <QClipboard>
+#include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTimer>
+
+#include <algorithm>
+#include <fcntl.h>
+#include <linux/videodev2.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 namespace {
 // Mirror of the SDK's AiWorkModeType values we use (see dev.hpp:554). Kept as
@@ -15,6 +22,31 @@ namespace {
 constexpr int kAiNone = 0;    // AiWorkModeNone
 constexpr int kAiHuman = 2;   // AiWorkModeHuman (single-person tracking)
 constexpr int kAiSwitching = 6;
+
+// Find the first V4L2 video capture node whose card name contains "OBSBOT".
+QString findObsbotCaptureDevice() {
+    QStringList nodes = QDir(QStringLiteral("/dev"))
+                            .entryList({QStringLiteral("video*")}, QDir::System | QDir::Files);
+    std::sort(nodes.begin(), nodes.end(), [](const QString &a, const QString &b) {
+        return a.mid(5).toInt() < b.mid(5).toInt();
+    });
+    for (const QString &n : nodes) {
+        const QString path = QStringLiteral("/dev/") + n;
+        const int fd = ::open(path.toLocal8Bit().constData(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) continue;
+        v4l2_capability cap{};
+        const bool ok = (::ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0);
+        ::close(fd);
+        if (!ok) continue;
+        const __u32 caps = (cap.capabilities & V4L2_CAP_DEVICE_CAPS) ? cap.device_caps
+                                                                     : cap.capabilities;
+        if (!(caps & V4L2_CAP_VIDEO_CAPTURE)) continue;
+        const QString card = QString::fromLatin1(reinterpret_cast<const char *>(cap.card));
+        if (card.contains(QLatin1String("OBSBOT"), Qt::CaseInsensitive))
+            return path;
+    }
+    return QString();
+}
 
 // NOTE: contains a UTF-8 degree sign — convert with fromUtf8, never fromLatin1
 // (fromLatin1 renders it as the "78Â°" mojibake Rex saw in the log).
@@ -37,10 +69,10 @@ CameraController::CameraController(QObject *parent) : QObject(parent) {
     m_settings = Settings::load();
     m_aiModeName = QStringLiteral("Off");
 
-    // ffplay fallback availability: ffplay present AND a /dev/video0 node exists.
+    // ffplay fallback availability: ffplay present AND an OBSBOT video capture node exists.
     // (The embedded preview has its own by-name device detection in PreviewEngine.)
     m_previewAvailable = !QStandardPaths::findExecutable("ffplay").isEmpty()
-                         && QFileInfo::exists("/dev/video0");
+                         && !findObsbotCaptureDevice().isEmpty();
 
     m_pendingTimer = new QTimer(this);
     m_pendingTimer->setSingleShot(true);
@@ -422,8 +454,9 @@ void CameraController::launchPreview() {
     // embedded preview (PreviewEngine) for boxes where QtMultimedia misbehaves.
     // Occupies the UVC node — conflicts with the embedded preview and with
     // browser/Meet/OBS camera use, exactly like any other capture client.
-    if (!m_previewAvailable) {
-        emit logLine("warn", QStringLiteral("preview: ffplay or /dev/video0 not available"));
+    const QString obsbotNode = findObsbotCaptureDevice();
+    if (obsbotNode.isEmpty() || QStandardPaths::findExecutable("ffplay").isEmpty()) {
+        emit logLine("warn", QStringLiteral("preview: ffplay or OBSBOT video device not available"));
         return;
     }
     stopPreview();   // kill any existing preview first (also used to reload on res change)
@@ -447,7 +480,7 @@ void CameraController::launchPreview() {
         "-video_size", QStringLiteral("%1x%2").arg(pr.w).arg(pr.h),
         "-framerate", QString::number(pr.fps),
         "-window_title", QStringLiteral("OBSBOT preview (%1)").arg(QString::fromLatin1(pr.label)),
-        "/dev/video0"};
+        obsbotNode};
     m_previewProc->start(QStringLiteral("ffplay"), args);
     emit logLine("cmd", QStringLiteral("preview: launched ffplay at %1 (external window, fallback)")
                             .arg(QString::fromLatin1(pr.label)));

@@ -18,7 +18,15 @@ cd "$SCRIPT_DIR"
 
 QT_DIR="$SCRIPT_DIR/qt"
 BUILD_DIR="$QT_DIR/build"
-SDK_LIB="$SCRIPT_DIR/sdk/libdev_v2.1.0_8/linux/x86_64-release"
+if [ -d "$SCRIPT_DIR/sdk/libdev_2.1.0.10/linux/x86_64-release" ]; then
+    SDK_LIB="$SCRIPT_DIR/sdk/libdev_2.1.0.10/linux/x86_64-release"
+elif [ -d "$SCRIPT_DIR/sdk/libdev_v2.1.0_8/linux/x86_64-release" ]; then
+    SDK_LIB="$SCRIPT_DIR/sdk/libdev_v2.1.0_8/linux/x86_64-release"
+elif [ -d "$SCRIPT_DIR/sdk-probe/libdev_2.1.0.10/linux/x86_64-release" ]; then
+    SDK_LIB="$SCRIPT_DIR/sdk-probe/libdev_2.1.0.10/linux/x86_64-release"
+else
+    SDK_LIB="$SCRIPT_DIR/sdk/linux/x86_64-release"
+fi
 BIN="$BUILD_DIR/obsbot4linux"
 
 if ! command -v cmake >/dev/null 2>&1; then

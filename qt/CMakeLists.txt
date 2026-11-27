@@ -12,7 +12,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 # ---- Vendored OBSBOT SDK (repo-local) --------------------------------------
-set(SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../sdk/libdev_v2.1.0_8")
+if(NOT DEFINED SDK_ROOT)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../sdk/libdev_2.1.0.10")
+        set(SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../sdk/libdev_2.1.0.10" CACHE PATH "Path to OBSBOT SDK root")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../sdk/libdev_v2.1.0_8")
+        set(SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../sdk/libdev_v2.1.0_8" CACHE PATH "Path to OBSBOT SDK root")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../sdk-probe/libdev_2.1.0.10")
+        set(SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../sdk-probe/libdev_2.1.0.10" CACHE PATH "Path to OBSBOT SDK root")
+    else()
+        set(SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../sdk" CACHE PATH "Path to OBSBOT SDK root")
+    endif()
+endif()
 set(SDK_INC  "${SDK_ROOT}/include")
 set(SDK_LIB  "${SDK_ROOT}/linux/x86_64-release")
 

@@ -17,7 +17,15 @@ set -euo pipefail
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)   # qt/packaging
 QT_DIR=$(cd -- "$HERE/.." && pwd)                   # qt/
 REPO=$(cd -- "$QT_DIR/.." && pwd)                   # repo root
-SDK_LIB="$REPO/sdk/libdev_v2.1.0_8/linux/x86_64-release"
+if [ -d "$REPO/sdk/libdev_2.1.0.10/linux/x86_64-release" ]; then
+    SDK_LIB="$REPO/sdk/libdev_2.1.0.10/linux/x86_64-release"
+elif [ -d "$REPO/sdk/libdev_v2.1.0_8/linux/x86_64-release" ]; then
+    SDK_LIB="$REPO/sdk/libdev_v2.1.0_8/linux/x86_64-release"
+elif [ -d "$REPO/sdk-probe/libdev_2.1.0.10/linux/x86_64-release" ]; then
+    SDK_LIB="$REPO/sdk-probe/libdev_2.1.0.10/linux/x86_64-release"
+else
+    SDK_LIB="$REPO/sdk/linux/x86_64-release"
+fi
 
 BUILD="$QT_DIR/build-appimage"
 APPDIR="$QT_DIR/AppDir"
@@ -41,7 +49,8 @@ if [ -z "$QMAKE_BIN" ]; then
 fi
 QT_BIN_DIR=$(dirname "$QMAKE_BIN")
 QT_LIB_DIR=$("$QMAKE_BIN" -query QT_INSTALL_LIBS 2>/dev/null || echo "$QT_BIN_DIR/../lib")
-export PATH="$QT_BIN_DIR:$TOOLS:$PATH"   # so qmlimportscanner + tools are found
+QT_LIBEXEC_DIR=$("$QMAKE_BIN" -query QT_INSTALL_LIBEXECS 2>/dev/null || echo "$QT_BIN_DIR/../libexec")
+export PATH="$QT_BIN_DIR:$QT_LIBEXEC_DIR:/usr/lib/qt6/libexec:/usr/lib/qt6/bin:$TOOLS:$PATH"   # so qmlimportscanner + tools are found
 # linuxdeploy resolves ELF deps via LD_LIBRARY_PATH — Qt libs + the SDK must be here.
 export LD_LIBRARY_PATH="$QT_LIB_DIR:$SDK_LIB:${LD_LIBRARY_PATH:-}"
 echo ">> using qmake: $QMAKE_BIN"
@@ -67,11 +76,11 @@ rm -rf "$BUILD" "$APPDIR"
 cmake -S "$QT_DIR" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF
 cmake --build "$BUILD" -j
 DESTDIR="$APPDIR" cmake --install "$BUILD" --prefix /usr
+cp -f "$HERE/icons/obsbot4linux-256.png" "$APPDIR/obsbot4linux.png"
 
 # --- bundle the OBSBOT SDK (.so + SONAME symlink) ---------------------------
 mkdir -p "$APPDIR/usr/lib"
-cp -av "$SDK_LIB/libdev.so.1.0.3" "$APPDIR/usr/lib/"
-ln -sf libdev.so.1.0.3 "$APPDIR/usr/lib/libdev.so.1"
+cp -av "$SDK_LIB"/libdev.so* "$APPDIR/usr/lib/"
 
 # --- Qt plugin config: scan our QML so the right modules are bundled --------
 export QML_SOURCES_PATHS="$QT_DIR/qml"
