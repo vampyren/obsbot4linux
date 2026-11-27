@@ -51,6 +51,8 @@ class CameraController : public QObject {
     // it is portrait-orientation tracking, not face tracking.)
     Q_PROPERTY(bool aiTracking READ aiTracking NOTIFY aiChanged)
     Q_PROPERTY(bool faceFocus READ faceFocus NOTIFY aiChanged)
+    Q_PROPERTY(int trackingFraming READ trackingFraming WRITE setTrackingFraming NOTIFY trackingFramingChanged)
+    Q_PROPERTY(int aiSubMode MEMBER m_aiSubMode NOTIFY aiChanged)
     Q_PROPERTY(bool gesture READ gesture NOTIFY aiChanged)
     Q_PROPERTY(bool hdrOn READ hdrOn NOTIFY imageChanged)
     Q_PROPERTY(bool aiPending MEMBER m_aiPending NOTIFY aiChanged)
@@ -64,6 +66,7 @@ class CameraController : public QObject {
     Q_PROPERTY(int previewResIndex READ previewResIndex WRITE setPreviewResIndex NOTIFY settingsChanged)
     Q_PROPERTY(QString previewRes READ previewRes NOTIFY settingsChanged)   // human-readable, for STATUS
     Q_PROPERTY(bool sleepOnExit READ sleepOnExit WRITE setSleepOnExit NOTIFY settingsChanged)
+    Q_PROPERTY(bool previewAutoStart READ previewAutoStart WRITE setPreviewAutoStart NOTIFY settingsChanged)
     // Experimental, OPT-IN: slow the status cadence while gesture control is on
     // (frequent polling suppresses the camera's gesture recognizer). Off by
     // default so normal behavior is unchanged; kept toggleable for A/B testing
@@ -86,12 +89,15 @@ class CameraController : public QObject {
     Q_PROPERTY(int contrast MEMBER m_contrast NOTIFY imageChanged)
     Q_PROPERTY(int saturation MEMBER m_saturation NOTIFY imageChanged)
     Q_PROPERTY(int sharpness MEMBER m_sharpness NOTIFY imageChanged)
+    Q_PROPERTY(int wbMode READ wbMode WRITE setWbMode NOTIFY imageChanged)
+    Q_PROPERTY(int wbTemp READ wbTemp WRITE setWbTemp NOTIFY imageChanged)
 
     // ----- capability gating -----
     Q_PROPERTY(bool capAi READ capAi CONSTANT)
     Q_PROPERTY(bool capFace READ capFace CONSTANT)
     Q_PROPERTY(bool capFov READ capFov CONSTANT)
     Q_PROPERTY(bool capImage READ capImage CONSTANT)      // brightness/contrast/sat/sharp (0–100)
+    Q_PROPERTY(bool capWb READ capWb CONSTANT)
     Q_PROPERTY(bool capGesture READ capGesture CONSTANT)
     Q_PROPERTY(bool capHdr READ capHdr NOTIFY imageChanged)   // dynamic: device reports hdr_support
     Q_PROPERTY(bool capTrackingAdvanced READ capTrackingAdvanced CONSTANT)
@@ -132,15 +138,20 @@ public:
     int previewResIndex() const { return m_settings.previewResIndex; }
     QString previewRes() const;   // e.g. "1080p60"
     bool sleepOnExit() const { return m_settings.sleepOnExit; }
+    bool previewAutoStart() const { return m_settings.previewAutoStart; }
     bool gestureLowTraffic() const { return m_settings.gestureLowTraffic; }
     int autoSleepIndex() const { return m_settings.autoSleepIdx; }
     int micSleepIndex() const { return m_settings.micSleepIdx; }
+    int trackingFraming() const { return m_settings.trackFraming; }
+    int wbMode() const { return m_settings.wbMode; }
+    int wbTemp() const { return m_settings.wbTemp; }
     QString appVersion() const;
 
     bool capAi() const { return true; }
     bool capFace() const { return true; }
     bool capFov() const { return true; }
     bool capImage() const { return true; }          // brightness/contrast/sat/sharp: SDK 0–100
+    bool capWb() const { return true; }             // White balance verified on Tiny 3 Lite
     bool capGesture() const { return true; }        // aiSetGestureCtrlIndividualR (rc reported honestly)
     bool capHdr() const { return m_hdrSupport; }    // device-reported hdr_support for the current mode
     bool capTrackingAdvanced() const { return false; }   // framing/sensitivity/zone unverified
@@ -160,9 +171,13 @@ public slots:
     void setAiReturnPreset(int p);
     void setPreviewResIndex(int idx);
     void setSleepOnExit(bool on);
+    void setPreviewAutoStart(bool on);
     void setGestureLowTraffic(bool on);
     void setAutoSleepIndex(int idx);
     void setMicSleepIndex(int idx);
+    void setTrackingFraming(int framing);
+    void setWbMode(int mode);
+    void setWbTemp(int tempK);
     void resetImageDefaults();     // set brightness/contrast/saturation/sharpness to 50
 
     // user actions (forwarded to the worker)
@@ -202,6 +217,7 @@ signals:
     void statusChanged();
     void zoomChanged();
     void aiChanged();
+    void trackingFramingChanged();
     void imageChanged();
     void settingsChanged();
     void presetsChanged();
@@ -213,10 +229,11 @@ private slots:
     void onConnectionResolved(bool found, const QString &product, const QString &sn,
                               const QString &fw, const QString &mode, int enumId);
     void onDeviceLost(const QString &reason);
-    void onStatusUpdate(int runState, int aiModeRaw, double zoom, bool zoomValid);
+    void onStatusUpdate(int runState, int aiModeRaw, int aiSubModeRaw, double zoom, bool zoomValid);
     void onAuxStatus(bool faceFocus, bool hdrOn, bool hdrSupport, int fps, int sleepMicro, int autoSleepSec);
     void onZoomUpdate(double zoom, bool valid);
     void onImageParams(int brightness, int contrast, int saturation, int sharpness);
+    void onWhiteBalanceParams(int mode, int tempK);
     void onWorkerResult(const QString &action, bool ok, int rc, const QString &message);
     void onPresetCaptured(int idx, double pitch, double yaw, double zoom, int fov);
 
@@ -246,6 +263,7 @@ private:
     double m_zoom = 1.0;
     bool m_zoomValid = false;
     int m_aiModeRaw = 0;
+    int m_aiSubMode = 0;
     QString m_aiModeName = QStringLiteral("Off");
 
     // Confirmed AI state (what the device actually is, per success/status).

@@ -164,11 +164,23 @@ RowLayout {
                         }
                         ToggleChip {
                             Layout.fillWidth: true
-                            text: "Face focus"; tone: Theme.busy
+                            text: "Face autofocus"; tone: Theme.live
                             enabled: cam.connected && cam.capFace
                             busy: cam.aiPending
                             checked: cam.faceFocus
                             onToggled: (c) => cam.setFaceFocus(c)
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 8
+                        SectionLabel { text: "Framing"; Layout.preferredWidth: 46 }
+                        Segmented {
+                            Layout.fillWidth: true
+                            enabled: cam.connected && cam.capAi
+                            options: ["Full", "Upper", "Close-up"]
+                            currentIndex: cam.trackingFraming
+                            onActivated: (i) => cam.trackingFraming = i
                         }
                     }
 

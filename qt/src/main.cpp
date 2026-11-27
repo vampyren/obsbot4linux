@@ -110,6 +110,20 @@ int main(int argc, char **argv) {
                          preview.setResIndex(controller.previewResIndex());
                      });
 
+    // Auto-start live preview on connect (opt-in via settings, default ON so user sees camera immediately).
+    QObject::connect(&controller, &CameraController::connStateChanged, &preview,
+                     [&controller, &preview]() {
+                         if (controller.connected() && !controller.asleep()
+                             && controller.previewAutoStart() && preview.available() && !preview.active()) {
+                             QTimer::singleShot(300, &preview, [&controller, &preview]() {
+                                 if (controller.connected() && !controller.asleep()
+                                     && controller.previewAutoStart() && preview.available() && !preview.active()) {
+                                     preview.start();
+                                 }
+                             });
+                         }
+                     });
+
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("cam", &controller);
     engine.rootContext()->setContextProperty("preview", &preview);

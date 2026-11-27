@@ -54,6 +54,7 @@ QJsonObject Settings::toJson(const AppSettings &s) {
     o["aiReturnPreset"] = s.aiReturnPreset;
     o["previewResIndex"] = s.previewResIndex;
     o["sleepOnExit"] = s.sleepOnExit;
+    o["previewAutoStart"] = s.previewAutoStart;
 
     QJsonArray presets;
     for (const auto &p : s.presets)
@@ -98,6 +99,7 @@ AppSettings Settings::fromJson(const QJsonObject &o) {
     s.aiReturnPreset = std::clamp(o.value("aiReturnPreset").toInt(s.aiReturnPreset), 0, 3);
     s.previewResIndex = std::clamp(o.value("previewResIndex").toInt(s.previewResIndex), 0, 3);
     s.sleepOnExit = o.value("sleepOnExit").toBool(s.sleepOnExit);
+    s.previewAutoStart = o.value("previewAutoStart").toBool(s.previewAutoStart);
 
     const QJsonArray presets = o.value("presets").toArray();
     for (int i = 0; i < 3 && i < presets.size(); ++i)

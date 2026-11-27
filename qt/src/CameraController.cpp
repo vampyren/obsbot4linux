@@ -3,11 +3,18 @@
 #include "PreviewFormats.h"
 
 #include <QClipboard>
+#include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTimer>
+
+#include <algorithm>
+#include <fcntl.h>
+#include <linux/videodev2.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 namespace {
 // Mirror of the SDK's AiWorkModeType values we use (see dev.hpp:554). Kept as
@@ -15,6 +22,31 @@ namespace {
 constexpr int kAiNone = 0;    // AiWorkModeNone
 constexpr int kAiHuman = 2;   // AiWorkModeHuman (single-person tracking)
 constexpr int kAiSwitching = 6;
+
+// Find the first V4L2 video capture node whose card name contains "OBSBOT".
+QString findObsbotCaptureDevice() {
+    QStringList nodes = QDir(QStringLiteral("/dev"))
+                            .entryList({QStringLiteral("video*")}, QDir::System | QDir::Files);
+    std::sort(nodes.begin(), nodes.end(), [](const QString &a, const QString &b) {
+        return a.mid(5).toInt() < b.mid(5).toInt();
+    });
+    for (const QString &n : nodes) {
+        const QString path = QStringLiteral("/dev/") + n;
+        const int fd = ::open(path.toLocal8Bit().constData(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) continue;
+        v4l2_capability cap{};
+        const bool ok = (::ioctl(fd, VIDIOC_QUERYCAP, &cap) == 0);
+        ::close(fd);
+        if (!ok) continue;
+        const __u32 caps = (cap.capabilities & V4L2_CAP_DEVICE_CAPS) ? cap.device_caps
+                                                                     : cap.capabilities;
+        if (!(caps & V4L2_CAP_VIDEO_CAPTURE)) continue;
+        const QString card = QString::fromLatin1(reinterpret_cast<const char *>(cap.card));
+        if (card.contains(QLatin1String("OBSBOT"), Qt::CaseInsensitive))
+            return path;
+    }
+    return QString();
+}
 
 // NOTE: contains a UTF-8 degree sign — convert with fromUtf8, never fromLatin1
 // (fromLatin1 renders it as the "78Â°" mojibake Rex saw in the log).
@@ -37,10 +69,10 @@ CameraController::CameraController(QObject *parent) : QObject(parent) {
     m_settings = Settings::load();
     m_aiModeName = QStringLiteral("Off");
 
-    // ffplay fallback availability: ffplay present AND a /dev/video0 node exists.
+    // ffplay fallback availability: ffplay present AND an OBSBOT video capture node exists.
     // (The embedded preview has its own by-name device detection in PreviewEngine.)
     m_previewAvailable = !QStandardPaths::findExecutable("ffplay").isEmpty()
-                         && QFileInfo::exists("/dev/video0");
+                         && !findObsbotCaptureDevice().isEmpty();
 
     m_pendingTimer = new QTimer(this);
     m_pendingTimer->setSingleShot(true);
@@ -63,6 +95,7 @@ CameraController::CameraController(QObject *parent) : QObject(parent) {
     connect(m_worker, &CameraWorker::auxStatus, this, &CameraController::onAuxStatus);
     connect(m_worker, &CameraWorker::zoomUpdate, this, &CameraController::onZoomUpdate);
     connect(m_worker, &CameraWorker::imageParams, this, &CameraController::onImageParams);
+    connect(m_worker, &CameraWorker::whiteBalanceParams, this, &CameraController::onWhiteBalanceParams);
     connect(m_worker, &CameraWorker::commandResult, this, &CameraController::onWorkerResult);
     connect(m_worker, &CameraWorker::presetCaptured, this, &CameraController::onPresetCaptured);
 
@@ -129,7 +162,11 @@ QString CameraController::decodeAiMode(int raw) const {
     switch (raw) {
     case 0:  return QStringLiteral("Off");
     case 1:  return QStringLiteral("Group track");
-    case 2:  return QStringLiteral("Human track");
+    case 2: {
+        if (m_aiSubMode == 1) return QStringLiteral("Human (Upper body)");
+        if (m_aiSubMode == 2) return QStringLiteral("Human (Close-up)");
+        return QStringLiteral("Human (Full body)");
+    }
     case 3:  return QStringLiteral("Hand track");
     case 4:  return QStringLiteral("Whiteboard");
     case 5:  return QStringLiteral("Desk");
@@ -248,7 +285,9 @@ void CameraController::resetImageDefaults() {
     setImageParam(QStringLiteral("contrast"), 50);
     setImageParam(QStringLiteral("saturation"), 50);
     setImageParam(QStringLiteral("sharpness"), 50);
-    emit logLine("cmd", QStringLiteral("image: reset to defaults (50)"));
+    setWbMode(0);
+    setWbTemp(5000);
+    emit logLine("cmd", QStringLiteral("image: reset to defaults (50, auto WB)"));
 }
 void CameraController::setFovIndex(int idx) {
     if (idx < 0 || idx > 2) return;
@@ -300,6 +339,55 @@ void CameraController::setGestureLowTraffic(bool on) {
         : QStringLiteral("gesture low-traffic mode disabled — normal status cadence"));
 }
 
+void CameraController::setPreviewAutoStart(bool on) {
+    if (on == m_settings.previewAutoStart) return;
+    m_settings.previewAutoStart = on;
+    persist();
+    emit settingsChanged();
+}
+
+void CameraController::setTrackingFraming(int framing) {
+    framing = std::clamp(framing, 0, 2);
+    if (framing == m_settings.trackFraming) return;
+    m_settings.trackFraming = framing;
+    persist();
+    emit trackingFramingChanged();
+    if (aiTracking()) {
+        QMetaObject::invokeMethod(m_worker, "cmdSetAi", Qt::QueuedConnection,
+                                  Q_ARG(int, kAiHuman), Q_ARG(int, framing),
+                                  Q_ARG(QString, QStringLiteral("framing")));
+    }
+}
+
+void CameraController::setWbMode(int mode) {
+    mode = (mode == 0) ? 0 : 1;
+    if (mode == m_settings.wbMode) return;
+    m_settings.wbMode = mode;
+    persist();
+    emit imageChanged();
+    QMetaObject::invokeMethod(m_worker, "cmdSetWhiteBalance", Qt::QueuedConnection,
+                              Q_ARG(int, m_settings.wbMode), Q_ARG(int, m_settings.wbTemp));
+}
+
+void CameraController::setWbTemp(int tempK) {
+    tempK = std::clamp(tempK, 2800, 7500);
+    if (tempK == m_settings.wbTemp && m_settings.wbMode == 1) return;
+    m_settings.wbTemp = tempK;
+    m_settings.wbMode = 1; // setting manual temperature automatically switches to manual mode
+    persist();
+    emit imageChanged();
+    QMetaObject::invokeMethod(m_worker, "cmdSetWhiteBalance", Qt::QueuedConnection,
+                              Q_ARG(int, m_settings.wbMode), Q_ARG(int, m_settings.wbTemp));
+}
+
+void CameraController::onWhiteBalanceParams(int mode, int tempK) {
+    m_settings.wbMode = mode;
+    if (tempK >= 2800 && tempK <= 7500) {
+        m_settings.wbTemp = tempK;
+    }
+    emit imageChanged();
+}
+
 // ---------------------------------------------------------------------------
 // User actions
 // ---------------------------------------------------------------------------
@@ -339,7 +427,8 @@ void CameraController::setAiTracking(bool on) {
     m_aiPending = true;              // suppress status-push fighting until confirmed (#8)
     m_pendingTimer->start();
     QMetaObject::invokeMethod(m_worker, "cmdSetAi", Qt::QueuedConnection,
-                              Q_ARG(int, on ? kAiHuman : kAiNone), Q_ARG(int, 0),
+                              Q_ARG(int, on ? kAiHuman : kAiNone),
+                              Q_ARG(int, on ? m_settings.trackFraming : 0),
                               Q_ARG(QString, on ? QStringLiteral("ai track on")
                                                 : QStringLiteral("ai track off")));
     emit aiChanged();
@@ -422,8 +511,9 @@ void CameraController::launchPreview() {
     // embedded preview (PreviewEngine) for boxes where QtMultimedia misbehaves.
     // Occupies the UVC node — conflicts with the embedded preview and with
     // browser/Meet/OBS camera use, exactly like any other capture client.
-    if (!m_previewAvailable) {
-        emit logLine("warn", QStringLiteral("preview: ffplay or /dev/video0 not available"));
+    const QString obsbotNode = findObsbotCaptureDevice();
+    if (obsbotNode.isEmpty() || QStandardPaths::findExecutable("ffplay").isEmpty()) {
+        emit logLine("warn", QStringLiteral("preview: ffplay or OBSBOT video device not available"));
         return;
     }
     stopPreview();   // kill any existing preview first (also used to reload on res change)
@@ -447,7 +537,7 @@ void CameraController::launchPreview() {
         "-video_size", QStringLiteral("%1x%2").arg(pr.w).arg(pr.h),
         "-framerate", QString::number(pr.fps),
         "-window_title", QStringLiteral("OBSBOT preview (%1)").arg(QString::fromLatin1(pr.label)),
-        "/dev/video0"};
+        obsbotNode};
     m_previewProc->start(QStringLiteral("ffplay"), args);
     emit logLine("cmd", QStringLiteral("preview: launched ffplay at %1 (external window, fallback)")
                             .arg(QString::fromLatin1(pr.label)));
@@ -599,7 +689,7 @@ void CameraController::onDeviceLost(const QString &reason) {
     emit logLine("warn", QStringLiteral("device lost: %1 — controls disabled").arg(reason));
 }
 
-void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, bool zoomValid) {
+void CameraController::onStatusUpdate(int runState, int aiModeRaw, int aiSubModeRaw, double zoom, bool zoomValid) {
     const int prevRun = m_runState;
     if (runState != m_runState) { m_runState = runState; emit statusChanged(); }
     // Wake edge (Asleep → Awake): re-apply the startup preset. The camera
@@ -630,6 +720,7 @@ void CameraController::onStatusUpdate(int runState, int aiModeRaw, double zoom, 
     m_zoom = zoom; m_zoomValid = zoomValid; emit zoomChanged();
 
     m_aiModeRaw = aiModeRaw;
+    m_aiSubMode = aiSubModeRaw;
     m_aiModeName = decodeAiMode(aiModeRaw);
     // Resync confirmed AI Track from the device UNLESS a toggle is in flight (#8)
     // or the device is mid-switch (#5). Any settled ai_mode > None means tracking

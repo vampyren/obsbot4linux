@@ -1,0 +1,63 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Add Tuxedo OS repo for modern Qt 6.10 on Ubuntu 24.04 (glibc 2.39 target)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    gnupg \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://deb.tuxedocomputers.com/0x54840598.pub.asc | gpg --dearmor -o /etc/apt/keyrings/tuxedo-archive-keyring.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/tuxedo-archive-keyring.gpg] https://txos.tuxedocomputers.com/ubuntu-plasma noble noble-updates main" > /etc/apt/sources.list.d/tuxedo-plasma.list \
+    && echo "deb [signed-by=/etc/apt/keyrings/tuxedo-archive-keyring.gpg] https://txos.tuxedocomputers.com/ubuntu noble main" >> /etc/apt/sources.list.d/tuxedo-plasma.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    g++ \
+    file \
+    git \
+    patchelf \
+    qt6-base-dev \
+    qt6-base-dev-tools \
+    qt6-declarative-dev \
+    qt6-declarative-dev-tools \
+    qt6-multimedia-dev \
+    libqt6gui6 \
+    libgl1-mesa-dev \
+    libx11-dev \
+    libx11-xcb-dev \
+    libxkbcommon-x11-0 \
+    libxkbcommon-x11-dev \
+    libxcb1-dev \
+    libxcb-render0-dev \
+    libxcb-shape0-dev \
+    libxcb-xfixes0-dev \
+    libxcb-icccm4-dev \
+    libxcb-image0-dev \
+    libxcb-keysyms1-dev \
+    libxcb-randr0-dev \
+    libxcb-render-util0-dev \
+    libxcb-sync-dev \
+    libxcb-xinerama0-dev \
+    libxcb-xkb-dev \
+    libxcb-cursor-dev \
+    libxcb-cursor0 \
+    qml6-module-qtquick \
+    qml6-module-qtquick-controls \
+    qml6-module-qtquick-layouts \
+    qml6-module-qtquick-window \
+    qml6-module-qtmultimedia \
+    libqt6multimedia6 \
+    libglib2.0-0 \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Ensure qmake is in path as both qmake and qmake6
+RUN ln -sf /usr/bin/qmake6 /usr/local/bin/qmake && \
+    ln -sf /usr/bin/qmake6 /usr/local/bin/qmake6
+
+ENV PATH="/usr/lib/qt6/libexec:/usr/lib/qt6/bin:${PATH}"
+
+WORKDIR /workspace
+

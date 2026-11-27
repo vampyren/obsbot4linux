@@ -114,7 +114,79 @@ RowLayout {
             }
         }
 
-        // still-gated controls (WB / color temp / exposure)
+        // White balance & color temperature (verified on Tiny 3 Lite)
+        GlassPanel {
+            Layout.fillWidth: true
+            implicitHeight: wbCol.implicitHeight + 28
+            ColumnLayout {
+                id: wbCol
+                anchors.fill: parent
+                anchors.margins: 14
+                spacing: Theme.s3
+
+                SectionLabel { text: "White balance" }
+
+                RowLayout {
+                    spacing: 10
+                    Text { text: "Mode"; color: Theme.fg; font.family: Theme.mono; font.pixelSize: 13; Layout.preferredWidth: 96 }
+                    Segmented {
+                        Layout.fillWidth: true
+                        enabled: cam.connected && cam.capWb
+                        options: ["Auto", "Manual"]
+                        currentIndex: cam.wbMode
+                        onActivated: (i) => cam.setWbMode(i)
+                    }
+                }
+
+                RowLayout {
+                    id: tempRow
+                    spacing: 10
+                    enabled: cam.connected && cam.capWb && cam.wbMode === 1
+                    opacity: enabled ? 1 : 0.4
+                    Text { text: "Color temp"; color: Theme.fg; font.family: Theme.mono; font.pixelSize: 13; Layout.preferredWidth: 96 }
+                    Slider {
+                        id: tempSl
+                        Layout.fillWidth: true
+                        enabled: tempRow.enabled
+                        from: 2800; to: 7500; stepSize: 50
+                        value: cam.wbTemp
+                        onPressedChanged: if (!pressed) cam.setWbTemp(Math.round(value))
+
+                        background: Rectangle {
+                            x: tempSl.leftPadding
+                            y: tempSl.topPadding + tempSl.availableHeight / 2 - height / 2
+                            width: tempSl.availableWidth; height: 5; radius: 2.5
+                            color: Qt.rgba(1, 1, 1, 0.12)
+                            Rectangle {
+                                width: tempSl.position * parent.width; height: parent.height; radius: 2.5
+                                color: Theme.accent
+                            }
+                        }
+                        handle: Rectangle {
+                            x: tempSl.leftPadding + tempSl.position * (tempSl.availableWidth - width)
+                            y: tempSl.topPadding + tempSl.availableHeight / 2 - height / 2
+                            width: 18; height: 18; radius: 9
+                            color: tempSl.pressed ? Theme.accentDeep : Theme.accentSoft
+                            border.width: 1; border.color: Theme.accentDeep
+                        }
+                    }
+                    Rectangle {
+                        Layout.preferredWidth: 62; Layout.preferredHeight: 24
+                        radius: Theme.rControl
+                        color: tempSl.pressed ? Theme.accentTint : Qt.rgba(1, 1, 1, 0.04)
+                        border.width: 1; border.color: tempSl.pressed ? Theme.accentRing : Theme.border
+                        Text {
+                            anchors.centerIn: parent
+                            text: Math.round(tempSl.value) + "K"
+                            color: tempSl.pressed ? Theme.accentSoft : Theme.fg
+                            font.family: Theme.mono; font.pixelSize: 13
+                        }
+                    }
+                }
+            }
+        }
+
+        // still-gated controls (Exposure)
         Rectangle {
             Layout.fillWidth: true
             radius: Theme.rControl
@@ -125,31 +197,10 @@ RowLayout {
             Text {
                 id: banner
                 anchors.fill: parent; anchors.margins: 10
-                text: "White balance, color temperature and exposure are disabled — " + cam.capUnverifiedReason
+                text: "Exposure control is disabled — " + cam.capUnverifiedReason
                 color: Theme.degraded
                 font.family: Theme.mono; font.pixelSize: 12
                 wrapMode: Text.WordWrap
-            }
-        }
-        GlassPanel {
-            Layout.fillWidth: true
-            implicitHeight: gcol.implicitHeight + 28
-            ColumnLayout {
-                id: gcol
-                anchors.fill: parent
-                anchors.margins: 14
-                spacing: Theme.s3
-                enabled: false
-                RowLayout {
-                    spacing: 10
-                    Text { text: "White balance"; color: Theme.dim; font.family: Theme.mono; font.pixelSize: 12; Layout.preferredWidth: 96 }
-                    Segmented { options: ["Auto", "Manual"]; currentIndex: 0; enabled: false }
-                }
-                RowLayout {
-                    spacing: 10
-                    Text { text: "Exposure"; color: Theme.dim; font.family: Theme.mono; font.pixelSize: 12; Layout.preferredWidth: 96 }
-                    Segmented { options: ["Auto", "−1 EV", "+1 EV"]; currentIndex: 0; enabled: false }
-                }
             }
         }
     }

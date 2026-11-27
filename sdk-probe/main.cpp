@@ -143,7 +143,7 @@ bool parseArgs(int argc, char **argv, Options &opt, int &exit_code) {
 
 void printDevice(const std::shared_ptr<Device> &dev, int index) {
     const ObsbotProductType type = dev->productType();
-    const bool is_tiny3 = (type == ObsbotProdTiny3);
+    const bool is_tiny3 = (type == ObsbotProdTiny3 || type == ObsbotProdTiny3Lite);
 
     std::cout << "-----------------------------------------------------\n";
     std::cout << "  index:        " << index << "\n";
@@ -218,7 +218,7 @@ int main(int argc, char **argv) {
     bool any_tiny3 = false;
     for (const auto &dev : dev_list) {
         printDevice(dev, index++);
-        if (dev->productType() == ObsbotProdTiny3) {
+        if (dev->productType() == ObsbotProdTiny3 || dev->productType() == ObsbotProdTiny3Lite) {
             any_tiny3 = true;
         }
     }
